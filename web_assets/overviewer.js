@@ -45,6 +45,51 @@ var overviewer = {
          */
         'infoWindow':   null
     },
+    'api': {
+        'hooks': {
+            'pre_init': [],
+            'pre_init_mapTypes': [],
+            'post_init_mapTypes': [],
+            'pre_init_map': [],
+            'post_init_map': [],
+            'pre_init_markers': [],
+            'post_init_markers': [],
+            'pre_init_regions': [],
+            'post_init_regions': [],
+            'pre_init_controls': [],
+            'post_init_controls': [],
+            'post_init': [],
+            'on_marker_create': [],
+            'on_marker_click': [],
+            'on_marker_infowindow_open': [],
+            'on_marker_infowindow_close': [],
+            'on_marker_remove': [],
+            'on_region_create': [],
+            'on_region_click': [],
+            'on_region_infowindow_open': [],
+            'on_region_infowindow_close': [],
+            'on_region_remove': [],
+            'on_maptype_change': [],
+            'on_map_click': [],
+            'on_map_viewchange': []
+        },
+        'method': {
+            'addHookAction': function(hook, action) {
+                overviewer.api.hooks[hook].push(action);
+            },
+            'removeHookAction': function(hook, action) {
+                for(i in overviewer.api.hooks[hook]) {
+                    if( overviewer.api.hooks[hook][i] == action) {
+                        //TODO: this is wrong, fix it
+                        delete(overviewer.api.hooks[hook][i]);
+                    }
+                }
+            },
+            'addControl': function(control, position) {
+                
+            }
+        }
+    },
     'util': {
         /**
          * General initialization function, called when the page is loaded.
