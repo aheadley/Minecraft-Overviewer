@@ -322,6 +322,10 @@ class QuadtreeGen(object):
             return    
         #logging.debug("writing out innertile {0}".format(imgpath))
 
+        #timecraft: delete before rerendering if it's a hardlink
+        if os.stat(imgpath)[stat.ST_NLINK] > 1:
+            os.unlink(imgpath)
+
         # Create the actual image now
         img = Image.new("RGBA", (384, 384), self.bgcolor)
         
