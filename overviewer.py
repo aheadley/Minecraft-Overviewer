@@ -20,7 +20,11 @@ BAD_VERSION = 16
 BAD_CEXT    = 17
 MISSING_CEXT= 18
 OLD_CEXT    = 19
-MISSING_ARG = 32
+MISSING_WARG= 32
+BAD_WARG    = 33
+MISSING_OARG= 34
+EXTRA_ARG   = 35
+OPT_CONFLICT= 48
 
 import sys
 if sys.version_info[0] >= 3:
@@ -157,22 +161,20 @@ def main():
         sys.exit(OK)
 
     if len(args) < 1:
-        logging.error("You need to give me your world number or directory")
+        logging.error("World (path or number) argument required.")
         parser.print_help()
         list_worlds()
-        sys.exit(MISSING_ARG)
+        sys.exit(MISSING_WARG)
     worlddir = args[0]
 
     if not os.path.exists(worlddir):
         # world given is either world number, or name
         worlds = world.get_worlds()
-        
         # if there are no worlds found at all, exit now
         if not worlds:
+            logging.error("No worlds found.")
             parser.print_help()
-            logging.error("Invalid world path")
-            sys.exit(1)
-        
+            sys.exit(BAD_WARG)
         try:
             worldnum = int(worlddir)
             worlddir = worlds[worldnum]['path']
@@ -182,34 +184,35 @@ def main():
                 worlddir = worlds[worlddir]['path']
             except KeyError:
                 # it's not a number, name, or path
+                logging.error("Invalid world name or number: %s" % worlddir)
                 parser.print_help()
-                logging.error("Invalid world name or path")
-                sys.exit(1)
+                sys.exit(BAD_WARG)
         except KeyError:
             # it was an invalid number
             parser.print_help()
-            logging.error("Invalid world number")
-            sys.exit(1)
+            logging.error("Invalid world number: %d" % worldnum)
+            sys.exit(BAD_WARG)
     
     # final sanity check for worlddir
     if not os.path.exists(os.path.join(worlddir, 'level.dat')):
-        logging.error("Invalid world path -- does not contain level.dat")
-        sys.exit(1)
+        logging.error("Invalid world path, no level.dat found.")
+        sys.exit(BAD_WARG)
 
     if len(args) < 2:
-        logging.error("Where do you want to save the tiles?")
-        sys.exit(1)
+        logging.error("Output path argument required.")
+        sys.exit(MISSING_OARG)
     elif len(args) > 2:
         parser.print_help()
-        logging.error("Sorry, you specified too many arguments")
-        sys.exit(1)
+        logging.error("Exactly two arguments are required. Extra arguments: %s" %
+            ', '.join(args[2:]))
+        sys.exit(EXTRA_ARG)
 
 
     destdir = args[1]
     if options.display_config:
         # just display the config file and exit
         parser.display_config()
-        sys.exit(0)
+        sys.exit(OK)
 
 
     if options.regionlist:
@@ -218,8 +221,10 @@ def main():
         regionlist = None
 
     if options.imgformat:
-        if options.imgformat not in ('jpg','png'):
-            parser.error("Unknown imgformat!")
+        fmts = ('jpg', 'png')
+        if options.imgformat not in fmts:
+            logging.error("Unknown image format: %s" % options.imgformat)
+            logging.error("Image format should be one of: %s" % ', '.join(fmts))
         else:
             imgformat = options.imgformat
     else:
@@ -246,7 +251,9 @@ def main():
    
     useBiomeData = os.path.exists(os.path.join(worlddir, 'biomes'))
     if not useBiomeData:
-        logging.info("Notice: Not using biome data for tinting")
+        logging.info("Biome data not available.")
+    else:
+        logging.info("Biome data found.")
     
     # First do world-level preprocessing
     w = world.World(worlddir, destdir, useBiomeData=useBiomeData, regionlist=regionlist, north_direction=north_direction)
@@ -258,7 +265,7 @@ def main():
         logging.error("Overviewer.dat gives previous north-direction as "+w.persistentData['north_direction'])
         logging.error("Requested north-direction was "+north_direction)
         logging.error("To change north-direction of an existing render, --forcerender must be specified")
-        sys.exit(1)
+        sys.exit(OPT_CONFLICT)
     
     w.go(options.procs)
 
@@ -297,7 +304,6 @@ def main():
 
 def list_worlds():
     "Prints out a brief summary of saves found in the default directory"
-    print 
     worlds = world.get_worlds()
     if not worlds:
         print 'No world saves found in the usual place'
