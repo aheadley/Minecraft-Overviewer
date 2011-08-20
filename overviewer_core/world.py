@@ -422,23 +422,21 @@ def get_worlds():
     "Returns {world # or name : level.dat information}"
     ret = {}
     save_dir = get_save_dir()
-
     # No dirs found - most likely not running from inside minecraft-dir
     if save_dir is None:
         return None
-
-    for dir in os.listdir(save_dir):
-        world_dat = os.path.join(save_dir, dir, "level.dat")
-        if not os.path.exists(world_dat): continue
+    for dir_ in os.listdir(save_dir):
+        world_dat = os.path.join(save_dir, dir_, "level.dat")
+        if not os.path.exists(world_dat):
+            continue
         info = nbt.load(world_dat)[1]
-        info['Data']['path'] = os.path.join(save_dir, dir)
-        if dir.startswith("World") and len(dir) == 6:
+        info['Data']['path'] = os.path.join(save_dir, dir_)
+        if dir_.startswith("World") and len(dir_) == 6:
             try:
-                world_n = int(dir[-1])
+                world_n = int(dir_[-1])
                 ret[world_n] = info['Data']
             except ValueError:
                 pass
         if 'LevelName' in info['Data'].keys():
             ret[info['Data']['LevelName']] = info['Data']
-
     return ret
