@@ -15,12 +15,20 @@
 #    You should have received a copy of the GNU General Public License along
 #    with the Overviewer.  If not, see <http://www.gnu.org/licenses/>.
 
+OK          = 0
+BAD_VERSION = 16
+BAD_CEXT    = 17
+MISSING_CEXT= 18
+OLD_CEXT    = 19
+MISSING_ARG = 32
+
 import sys
-if not (sys.version_info[0] == 2 and sys.version_info[1] >= 6):
-    print "Sorry, the Overviewer requires at least Python 2.6 to run"
-    if sys.version_info[0] >= 3:
-        print "and will not run on Python 3.0 or later"
-    sys.exit(1)
+if sys.version_info[0] >= 3:
+    print("Overviewer is not compatible with Python 3.x")
+    sys.exit(BAD_VERSION)
+elif not (sys.version_info[0] == 2 and sys.version_info[1] >= 6):
+    print("Overviewer is not compatible with Python 2.5 or earlier")
+    sys.exit(BAD_VERSION)
 
 import os
 import os.path
@@ -34,51 +42,53 @@ from overviewer_core import util
 
 logging.basicConfig(level=logging.INFO,format="%(asctime)s [%(levelname)s] %(message)s")
 
-this_dir = util.get_program_path()
+pwd = util.get_program_path()
 
 # make sure the c_overviewer extension is available
 try:
     from overviewer_core import c_overviewer
-except ImportError:
-    ## if this is a frozen windows package, the following error messages about
-    ## building the c_overviewer extension are not appropriate
+except ImportError, err:
+    # if this is a frozen windows package, the following error messages about
+    # building the c_overviewer extension are not appropriate
     if hasattr(sys, "frozen"):
-        print "Something has gone wrong importing the c_overviewer extension.  Please"
-        print "make sure the 2008 and 2010 redistributable packages from Microsoft"
-        print "are installed."
-        sys.exit(1)
-
-
-    ## try to find the build extension
-    ext = os.path.join(this_dir, "overviewer_core", "c_overviewer.%s" % ("pyd" if platform.system() == "Windows" else "so"))
+        print("""Somethign has gone wrong importing the c_overviewer extension.
+                 Please make sure the 2008 and 2010 redistributable packages from Microsoft
+                 are installed.""")
+        sys.exit(BAD_CEXT)
+    # try to find the build extension
+    ext = os.path.join(pwd, "overviewer_core", "c_overviewer.")
+    if platform.system() == "Windows":
+        ext += "pyd"
+    else:
+        ext += "so"
     if os.path.exists(ext):
-        print "Something has gone wrong importing the c_overviewer extension.  Please"
-        print "make sure it is up-to-date (clean and rebuild)"
-        sys.exit(1)
-
-    print "You need to compile the c_overviewer module to run Minecraft Overviewer."
-    print "Run `python setup.py build`, or see the README for details."
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-
+        print("Error importing the c_overviewer extension: %s" % err)
+        print("Please make sure it is up-to-date (clean and rebuild")
+        sys.exit(BAD_CEXT)
+    else:
+        print("""Unable to locate c_overviewer extension, please compile it by
+                 running `python setup.py build`, or see the README file for
+                 details.""")
+        import traceback
+        traceback.print_exc()
+        sys.exit(MISSING_CEXT)
 
 if hasattr(sys, "frozen"):
     pass # we don't bother with a compat test since it should always be in sync
 elif "extension_version" in dir(c_overviewer):
     # check to make sure the binary matches the headers
-    if os.path.exists(os.path.join(this_dir, "overviewer_core", "src", "overviewer.h")):
-        with open(os.path.join(this_dir, "overviewer_core", "src", "overviewer.h")) as f:
+    if os.path.exists(os.path.join(pwd, "overviewer_core", "src", "overviewer.h")):
+        with open(os.path.join(pwd, "overviewer_core", "src", "overviewer.h")) as f:
             lines = f.readlines()
             lines = filter(lambda x: x.startswith("#define OVERVIEWER_EXTENSION_VERSION"), lines)
             if lines:
                 l = lines[0]
                 if int(l.split()[2].strip()) != c_overviewer.extension_version():
-                    print "Please rebuild your c_overviewer module.  It is out of date!"
-                    sys.exit(1)
+                    print("Please rebuild your c_overviewer module.  It is out of date!")
+                    sys.exit(OLD_CEXT)
 else:
-    print "Please rebuild your c_overviewer module.  It is out of date!"
-    sys.exit(1)
+    print("Please rebuild your c_overviewer module.  It is out of date!")
+    sys.exit(OLD_CEXT)
 
 from overviewer_core.configParser import ConfigOptionParser
 from overviewer_core import optimizeimages, world, quadtree
@@ -127,31 +137,30 @@ def main():
     if options.version:
         try:
             import overviewer_core.overviewer_version as overviewer_version
-            print "Minecraft-Overviewer %s" % overviewer_version.VERSION
-            print "Git commit: %s" % overviewer_version.HASH
-            print "built on %s" % overviewer_version.BUILD_DATE
-            print "Build machine: %s %s" % (overviewer_version.BUILD_PLATFORM, overviewer_version.BUILD_OS)
+            print("Minecraft-Overviewer %s" % overviewer_version.VERSION)
+            print("Git commit: %s" % overviewer_version.HASH)
+            print("\tbuilt on %s" % overviewer_version.BUILD_DATE)
+            print("\tby %s %s" % (overviewer_version.BUILD_PLATFORM, overviewer_version.BUILD_OS))
         except:
-            print "version info not found"
-            pass
-        sys.exit(0)
-    
+            print("Version info not found")
+        sys.exit(OK)
+
     if options.list_rendermodes:
         rendermode_info = map(c_overviewer.get_render_mode_info, avail_rendermodes)
         name_width = max(map(lambda i: len(i['name']), rendermode_info))
         for info in rendermode_info:
-            print "{name:{0}} {description}".format(name_width, **info)
-        sys.exit(0)
+            print("{name:{0}} {description}".format(name_width, **info))
+        sys.exit(OK)
 
     if options.advanced_help:
         parser.advanced_help()
-        sys.exit(0)
+        sys.exit(OK)
 
     if len(args) < 1:
         logging.error("You need to give me your world number or directory")
         parser.print_help()
         list_worlds()
-        sys.exit(1)
+        sys.exit(MISSING_ARG)
     worlddir = args[0]
 
     if not os.path.exists(worlddir):
