@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 #    This file is part of the Minecraft Overviewer.
 #
@@ -28,10 +29,10 @@ OPT_CONFLICT= 48
 
 import sys
 if sys.version_info[0] >= 3:
-    print("Overviewer is not compatible with Python 3.x")
+    print("Overviewer is not (yet) compatible with Python 3.x")
     sys.exit(BAD_VERSION)
 elif not (sys.version_info[0] == 2 and sys.version_info[1] >= 6):
-    print("Overviewer is not compatible with Python 2.5 or earlier")
+    print("Overviewer requires Python 2.6 or later")
     sys.exit(BAD_VERSION)
 
 import os
@@ -44,9 +45,10 @@ import logging
 import platform
 from overviewer_core import util
 
-logging.basicConfig(level=logging.INFO,format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s")
 
-pwd = util.get_program_path()
+pdir = util.get_program_path()
 
 # make sure the c_overviewer extension is available
 try:
@@ -55,12 +57,12 @@ except ImportError, err:
     # if this is a frozen windows package, the following error messages about
     # building the c_overviewer extension are not appropriate
     if hasattr(sys, "frozen"):
-        print("""Somethign has gone wrong importing the c_overviewer extension.
-                 Please make sure the 2008 and 2010 redistributable packages from Microsoft
-                 are installed.""")
+        print("Somethign has gone wrong importing the c_overviewer extension. \
+Please make sure the 2008 and 2010 redistributable packages from Microsoft are \
+installed.")
         sys.exit(BAD_CEXT)
     # try to find the build extension
-    ext = os.path.join(pwd, "overviewer_core", "c_overviewer.")
+    ext = os.path.join(pdir, "overviewer_core", "c_overviewer.")
     if platform.system() == "Windows":
         ext += "pyd"
     else:
@@ -70,9 +72,8 @@ except ImportError, err:
         print("Please make sure it is up-to-date (clean and rebuild")
         sys.exit(BAD_CEXT)
     else:
-        print("""Unable to locate c_overviewer extension, please compile it by
-                 running `python setup.py build`, or see the README file for
-                 details.""")
+        print("Unable to locate c_overviewer extension, please compile it by \
+running `python setup.py build`, or see the README file for details.")
         import traceback
         traceback.print_exc()
         sys.exit(MISSING_CEXT)
@@ -81,8 +82,8 @@ if hasattr(sys, "frozen"):
     pass # we don't bother with a compat test since it should always be in sync
 elif "extension_version" in dir(c_overviewer):
     # check to make sure the binary matches the headers
-    if os.path.exists(os.path.join(pwd, "overviewer_core", "src", "overviewer.h")):
-        with open(os.path.join(pwd, "overviewer_core", "src", "overviewer.h")) as f:
+    if os.path.exists(os.path.join(pdir, "overviewer_core", "src", "overviewer.h")):
+        with open(os.path.join(pdir, "overviewer_core", "src", "overviewer.h")) as f:
             lines = f.readlines()
             lines = filter(lambda x: x.startswith("#define OVERVIEWER_EXTENSION_VERSION"), lines)
             if lines:
@@ -99,9 +100,7 @@ from overviewer_core import optimizeimages, world, quadtree
 from overviewer_core import googlemap, rendernode
 
 
-helptext = """
-%prog [OPTIONS] <World # / Name / Path to World> <tiles dest dir>"""
-
+helptext = "%prog [OPTIONS] <World # / Name / Path to World> <tiles dest dir>"
 
 def main():
     try:
@@ -113,38 +112,150 @@ def main():
     avail_north_dirs = ['lower-left', 'upper-left', 'upper-right', 'lower-right', 'auto']
     
     parser = ConfigOptionParser(usage=helptext, config="settings.py")
-    parser.add_option("-V", "--version", dest="version", helptext="Displays version information and then exits", action="store_true")
-    parser.add_option("-p", "--processes", dest="procs", helptext="How many worker processes to start. Default %s" % cpus, default=cpus, action="store", type="int")
-    parser.add_option("-z", "--zoom", dest="zoom", helptext="Sets the zoom level manually instead of calculating it. This can be useful if you have outlier chunks that make your world too big. This value will make the highest zoom level contain (2**ZOOM)^2 tiles", action="store", type="int", advanced=True)
-    parser.add_option("--regionlist", dest="regionlist", helptext="A file containing, on each line, a path to a regionlist to update. Instead of scanning the world directory for regions, it will just use this list. Normal caching rules still apply.")
-    parser.add_option("--forcerender", dest="forcerender", helptext="Force re-rendering the entire map (or the given regionlist). Useful for re-rendering without deleting it.", action="store_true")
-    parser.add_option("--rendermodes", dest="rendermode", helptext="Specifies the render types, separated by commas. Use --list-rendermodes to list them all.", type="choice", choices=avail_rendermodes, required=True, default=avail_rendermodes[0], listify=True)
-    parser.add_option("--list-rendermodes", dest="list_rendermodes", action="store_true", helptext="List available render modes and exit.", commandLineOnly=True)
-    parser.add_option("--imgformat", dest="imgformat", helptext="The image output format to use. Currently supported: png(default), jpg.", advanced=True )
-    parser.add_option("--imgquality", dest="imgquality", default=95, helptext="Specify the quality of image output when using imgformat=\"jpg\".", type="int", advanced=True)
-    parser.add_option("--bg-color", dest="bg_color", helptext="Configures the background color for the GoogleMap output.  Specify in #RRGGBB format", advanced=True, type="string", default="#1A1A1A")
-    parser.add_option("--optimize-img", dest="optimizeimg", helptext="If using png, perform image file size optimizations on the output. Specify 1 for pngcrush, 2 for pngcrush+advdef and 3 for pngcrush-advdef with more agressive settings. This may double (or more) render times, but will produce up to 30% smaller images. NOTE: requires corresponding programs in $PATH or %PATH%", advanced=True)
-    parser.add_option("--web-assets-hook", dest="web_assets_hook", helptext="If provided, run this function after the web assets have been copied, but before actual tile rendering begins. It should accept a QuadtreeGen object as its only argument.", action="store", metavar="SCRIPT", type="function", advanced=True)
-    parser.add_option("--web-assets-path", dest="web_assets_path", helptext="Specifies a non-standard web_assets directory to use. Files here will overwrite the default web assets.", metavar="PATH", type="string", advanced=True)
-    parser.add_option("--textures-path", dest="textures_path", helptext="Specifies a non-standard textures path, from which terrain.png and other textures are loaded.", metavar="PATH", type="string", advanced=True)
-    parser.add_option("-q", "--quiet", dest="quiet", action="count", default=0, helptext="Print less output. You can specify this option multiple times.")
-    parser.add_option("-v", "--verbose", dest="verbose", action="count", default=0, helptext="Print more output. You can specify this option multiple times.")
-    parser.add_option("--skip-js", dest="skipjs", action="store_true", helptext="Don't output marker.js or regions.js")
-    parser.add_option("--no-signs", dest="nosigns", action="store_true", helptext="Don't output signs to markers.js")
-    parser.add_option("--north-direction", dest="north_direction", action="store", helptext="Specifies which corner of the screen north will point to. Defaults to whatever the current map uses, or lower-left for new maps. Valid options are: " + ", ".join(avail_north_dirs) + ".", type="choice", default="auto", choices=avail_north_dirs)
-    parser.add_option("--display-config", dest="display_config", action="store_true", helptext="Display the configuration parameters, but don't render the map.  Requires all required options to be specified", commandLineOnly=True)
-    #parser.add_option("--write-config", dest="write_config", action="store_true", helptext="Writes out a sample config file", commandLineOnly=True)
+    parser.add_option("-V", "--version",
+        dest="version",
+        helptext="Displays version information and then exits",
+        action="store_true")
+    parser.add_option("-p", "--processes",
+        dest="procs",
+        helptext="How many worker processes to start. Default %s" % cpus,
+        default=cpus,
+        action="store",
+        type="int")
+    parser.add_option("-z", "--zoom",
+        dest="zoom",
+        helptext="Sets the zoom level manually instead of calculating it. This \
+can be useful if you have outlier chunks that make your world too big. This \
+value will make the highest zoom level contain 2**(2*ZOOM) tiles",
+        action="store",
+        type="int",
+        advanced=True)
+    parser.add_option("--regionlist",
+        dest="regionlist",
+        helptext="A file containing, on each line, a path to a regionlist to \
+update. Instead of scanning the world directory for regions, it will just use \
+this list. Normal caching rules still apply.")
+    parser.add_option("--forcerender",
+        dest="forcerender",
+        helptext="Force re-rendering the entire map (or the given regionlist). \
+Useful for re-rendering without deleting it.",
+        action="store_true")
+    parser.add_option("--rendermodes",
+        dest="rendermode",
+        helptext="Specifies the render types, separated by commas. Use \
+--list-rendermodes to list them all.",
+        type="choice",
+        choices=avail_rendermodes,
+        required=True,
+        default=avail_rendermodes[0],
+        listify=True)
+    parser.add_option("--list-rendermodes",
+        dest="list_rendermodes",
+        action="store_true",
+        helptext="List available render modes and exit.",
+        commandLineOnly=True)
+    parser.add_option("--imgformat",
+        dest="imgformat",
+        helptext="The image output format to use. Currently supported: png \
+(default), jpg.",
+        advanced=True)
+    parser.add_option("--imgquality",
+        dest="imgquality",
+        default=95,
+        helptext="Specify the quality of image output when using imgformat=\"jpg\".",
+        type="int",
+        advanced=True)
+    parser.add_option("--bg-color",
+        dest="bg_color",
+        helptext="Configures the background color for the GoogleMap output. \
+Specify in #RRGGBB format",
+        advanced=True,
+        type="string",
+        default="#1A1A1A")
+    parser.add_option("--optimize-img",
+        dest="optimizeimg",
+        helptext="If using png, perform image file size optimizations on the \
+output. Specify 1 for pngcrush, 2 for pngcrush+advdef and 3 for pngcrush-advdef \
+with more agressive settings. This may double (or more) render times, but will \
+produce up to 30% smaller images. NOTE: requires corresponding programs in $PATH \
+or %PATH%",
+        advanced=True)
+    parser.add_option("--web-assets-hook",
+        dest="web_assets_hook",
+        helptext="If provided, run this function after the web assets have been \
+copied, but before actual tile rendering begins. It should accept a QuadtreeGen \
+object as its only argument.",
+        action="store",
+        metavar="SCRIPT",
+        type="function",
+        advanced=True)
+    parser.add_option("--web-assets-path",
+        dest="web_assets_path",
+        helptext="Specifies a non-standard web_assets directory to use. Files \
+here will overwrite the default web assets.",
+        metavar="PATH",
+        type="string",
+        advanced=True)
+    parser.add_option("--textures-path",
+        dest="textures_path",
+        helptext="Specifies a non-standard textures path, from which terrain.png \
+and other textures are loaded.",
+        metavar="PATH",
+        type="string",
+        advanced=True)
+    parser.add_option("-q", "--quiet",
+        dest="quiet",
+        action="count",
+        default=0,
+        helptext="Print less output. You can specify this option multiple times.")
+    parser.add_option("-v", "--verbose",
+        dest="verbose",
+        action="count",
+        default=0,
+        helptext="Print more output. You can specify this option multiple times.")
+    parser.add_option("--skip-js",
+        dest="skipjs",
+        action="store_true",
+        helptext="Don't output marker.js or regions.js")
+    parser.add_option("--no-signs",
+        dest="nosigns",
+        action="store_true",
+        helptext="Don't output signs to markers.js")
+    parser.add_option("--north-direction",
+        dest="north_direction",
+        action="store",
+        helptext="Specifies which corner of the screen north will point to. \
+Defaults to whatever the current map uses, or lower-left for new maps. Valid \
+options are: " + ", ".join(avail_north_dirs) + ".",
+        type="choice",
+        default="auto",
+        choices=avail_north_dirs)
+    parser.add_option("--display-config",
+        dest="display_config",
+        action="store_true",
+        helptext="Display the configuration parameters, but don't render the map. \
+Requires all required options to be specified",
+        commandLineOnly=True)
+    #parser.add_option("--write-config",
+        #dest="write_config",
+        #action="store_true",
+        #helptext="Writes out a sample config file",
+        #commandLineOnly=True)
 
     options, args = parser.parse_args()
 
+    logging.getLogger().setLevel(
+        logging.getLogger().level + 10 * options.quiet)
+    logging.getLogger().setLevel(
+        logging.getLogger().level - 10 * options.verbose)
 
     if options.version:
         try:
             import overviewer_core.overviewer_version as overviewer_version
             print("Minecraft-Overviewer %s" % overviewer_version.VERSION)
             print("Git commit: %s" % overviewer_version.HASH)
-            print("\tbuilt on %s" % overviewer_version.BUILD_DATE)
-            print("\tby %s %s" % (overviewer_version.BUILD_PLATFORM, overviewer_version.BUILD_OS))
+            print("\tbuilt %s" % overviewer_version.BUILD_DATE)
+            print("\ton %s %s" % (overviewer_version.BUILD_PLATFORM, overviewer_version.BUILD_OS))
         except:
             print("Version info not found")
         sys.exit(OK)
@@ -161,7 +272,7 @@ def main():
         sys.exit(OK)
 
     if len(args) < 1:
-        logging.error("World (path or number) argument required.")
+        logging.error("World (path, name, or number) argument required.")
         parser.print_help()
         list_worlds()
         sys.exit(MISSING_WARG)
@@ -189,8 +300,8 @@ def main():
                 sys.exit(BAD_WARG)
         except KeyError:
             # it was an invalid number
-            parser.print_help()
             logging.error("Invalid world number: %d" % worldnum)
+            parser.print_help()
             sys.exit(BAD_WARG)
     
     # final sanity check for worlddir
@@ -241,11 +352,6 @@ def main():
     else:
         north_direction = 'auto'
     
-    logging.getLogger().setLevel(
-        logging.getLogger().level + 10*options.quiet)
-    logging.getLogger().setLevel(
-        logging.getLogger().level - 10*options.verbose)
-
     logging.info("Welcome to Minecraft Overviewer!")
     logging.debug("Current log level: {0}".format(logging.getLogger().level))
    
@@ -256,14 +362,17 @@ def main():
         logging.info("Biome data found.")
     
     # First do world-level preprocessing
-    w = world.World(worlddir, destdir, useBiomeData=useBiomeData, regionlist=regionlist, north_direction=north_direction)
+    w = world.World(worlddir, destdir, useBiomeData=useBiomeData,
+        regionlist=regionlist, north_direction=north_direction)
     if north_direction == 'auto':
         north_direction = w.persistentData['north_direction']
         options.north_direction = north_direction
-    elif w.persistentData['north_direction'] != north_direction and not options.forcerender and not w.persistentDataIsNew:
+    elif w.persistentData['north_direction'] != north_direction and \
+            not options.forcerender and not w.persistentDataIsNew:
         logging.error("Conflicting north-direction setting!")
-        logging.error("Overviewer.dat gives previous north-direction as "+w.persistentData['north_direction'])
-        logging.error("Requested north-direction was "+north_direction)
+        logging.error("Overviewer.dat gives previous north-direction as " +
+            w.persistentData['north_direction'])
+        logging.error("Requested north-direction was " + north_direction)
         logging.error("To change north-direction of an existing render, --forcerender must be specified")
         sys.exit(OPT_CONFLICT)
     
@@ -271,17 +380,27 @@ def main():
 
     logging.info("Rending the following tilesets: %s", ",".join(options.rendermode))
 
-    bgcolor = (int(options.bg_color[1:3],16), int(options.bg_color[3:5],16), int(options.bg_color[5:7],16), 0)
+    bgcolor = (int(options.bg_color[1:3],16), int(options.bg_color[3:5],16),
+        int(options.bg_color[5:7],16), 0)
 
     # create the quadtrees
     # TODO chunklist
     q = []
-    qtree_args = {'depth' : options.zoom, 'imgformat' : imgformat, 'imgquality' : options.imgquality, 'optimizeimg' : optimizeimg, 'bgcolor' : bgcolor, 'forcerender' : options.forcerender}
+    qtree_args = {
+        'depth': options.zoom,
+        'imgformat': imgformat,
+        'imgquality': options.imgquality,
+        'optimizeimg': optimizeimg,
+        'bgcolor': bgcolor,
+        'forcerender': options.forcerender
+    }
     for rendermode in options.rendermode:
         if rendermode == 'normal':
-            qtree = quadtree.QuadtreeGen(w, destdir, rendermode=rendermode, tiledir='tiles', **qtree_args)
+            qtree = quadtree.QuadtreeGen(w, destdir, rendermode=rendermode,
+                tiledir='tiles', **qtree_args)
         else:
-            qtree = quadtree.QuadtreeGen(w, destdir, rendermode=rendermode, **qtree_args)
+            qtree = quadtree.QuadtreeGen(w, destdir, rendermode=rendermode,
+                **qtree_args)
         q.append(qtree)
     
     # do quadtree-level preprocessing
@@ -303,12 +422,12 @@ def main():
 
 
 def list_worlds():
-    "Prints out a brief summary of saves found in the default directory"
+    """Prints out a brief summary of saves found in the default directory"""
     worlds = world.get_worlds()
     if not worlds:
-        print 'No world saves found in the usual place'
+        logging.error("No worlds found in the default world locations")
         return
-    print "Detected saves:"
+    logging.info("Detected worlds:")
     for name, info in sorted(worlds.iteritems()):
         if isinstance(name, basestring) and name.startswith("World") and len(name) == 6:
             try:
@@ -319,11 +438,12 @@ def list_worlds():
             except ValueError:
                 pass
         timestamp = time.strftime("%Y-%m-%d %H:%M",
-                                  time.localtime(info['LastPlayed'] / 1000))
-        playtime = info['Time'] / 20
-        playstamp = '%d:%02d' % (playtime / 3600, playtime / 60 % 60)
-        size = "%.2fMB" % (info['SizeOnDisk'] / 1024. / 1024.)
-        print "World %s: %s Playtime: %s Modified: %s" % (name, size, playstamp, timestamp)
+            time.localtime(info["LastPlayed"] / 1000))
+        playtime = info["Time"] / 20
+        playstamp = "%d:%02d" % (playtime / 3600, playtime / 60 % 60)
+        size = "%.2fMB" % (info["SizeOnDisk"] / 1024. / 1024.)
+        logging.info("World %s: %s Playtime: %s Modified: %s" %
+            (name, size, playstamp, timestamp))
 
 
 if __name__ == "__main__":
