@@ -218,8 +218,7 @@ var overviewer = {
                 streetViewControl:      false,
                 overviewMapControl:     true,
                 zoomControl:            overviewerConfig.map.controls.zoom,
-                backgroundColor:        overviewer.util.getMapTypeBackgroundColor(
-                    overviewer.util.getDefaultMapTypeId())
+                backgroundColor:        'transparent'
             };
             overviewer.map = new google.maps.Map(document.getElementById(
                 overviewerConfig.CONST.mapDivId), mapOptions);
