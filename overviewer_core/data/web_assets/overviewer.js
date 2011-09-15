@@ -269,6 +269,11 @@ var overviewer = {
 				//smuggled this one in here for maptypeid hash generation --CounterPillow
 				overviewer.util.updateHash();
             });
+
+            // Set the map div background color now
+            $('#'+overviewerConfig.CONST.mapDivId).css(
+                'background-color', overviewer.util.getMapTypeBackgroundColor(
+                    overviewer.util.getDefaultMapTypeId()));
         },
         /**
          * Read through overviewer.collections.markerDatas and create Marker
