@@ -109,14 +109,15 @@ class RegionSet(object):
     world.
     """
     
-    SETTINGS_FILE       = 'overviewer.dat'
-    REGION_FILENAME_TPL = 'r.%d.%d.mcr'
-    DEFAULT_DATA        = {
+    #TODO persistent data stuff really belongs to the quadtree and should be
+    #  moved there at some point
+    PERSISTENT_DATA_FILENAME    = 'overviewer.dat'
+    REGION_FILENAME_TPL         = 'r.%d.%d.mcr'
+    REGION_DATA_CACHE_LIMIT     = 256
+    EMPTY_CHUNK                 = [None, None]
+    DEFAULT_DATA                = {
         'north_direction': 'lower-left',
     }
-    REGION_FILE_LIMIT           = 256
-    CHUNK_DATA_CACHE_LIMIT      = 1024
-    EMPTY_CHUNK                 = [None, None]
     NORTH_ROTATIONS             = {
         'lower-left': 0,
         'upper-left': 1,
@@ -140,12 +141,12 @@ class RegionSet(object):
         self.path = os.join(self.world.path, path)
         self._persistent_data = self.DEFAULT_DATA
         try:
-            self._persistent_data.update(self._load_settings())
+            self._persistent_data.update(self._read_persistent_data())
         except: #TODO: what goes here? file not found?
             logging.debug("Failed to load region set settings")
         self._persistent_data.update(kwargs)
         self.bounds = self._find_bounds()
-        self._chunk_cache = []
+        self._region_cache = {}
             
     def _get_name(self, path):
         """Get the actual name of a world from the level.dat file
@@ -158,26 +159,38 @@ class RegionSet(object):
             name = "world"
         return name
 
-    def _get_pickle_filename(self):
+    def _get_pickle_path(self):
         """
         """
         #TODO this should actually pull from the output dir but we don't know
         #  about it yet.
-        return os.path.join(self.path, self.SETTINGS_FILE)
+        return os.path.join(self.path, self.PERSISTENT_DATA_FILENAME)
         
-    def _read_settings(self):
-        #read data from pickle file into self._persistent_data
-        #TODO: merge or overwrite?
-        settings = {}
-        pickle_filename = self._get_pickle_filename()
-        if os.path.exists(pickle_filename):
-            with open(pickle_filename, 'rb') as pickle_file:
-                settings = cPickle.load(pickle_file)
-        return settings
+    def _read_persistent_data(self):
+        """Read persistent data from backing storage if available
+        """
+        data = {}
+        pickle_path = self._get_pickle_path()
+        with open(pickle_path, 'rb') as pickle_file:
+            data = cPickle.load(pickle_file)
+        return data
         
-    def write_settings(self):
-        #write self._persistent_data to pickle file
-        pass
+    def _write_persistent_data(self, data):
+        """Write the persistent data to backing storage.
+        """
+        pickle_path = self._get_pickle_path()
+        with open(pickle_path + '.new', 'wb') as pickle_file:
+            cPickle.dump(data, pickle_file)
+        try:
+            # Renames are not atomic on Windows and throw errors if the
+            #   destination already exists so we have to remove it first.
+            os.remove(pickle_path)
+        except OSError:
+            #TODO better exception here
+            os.remove(pickle_path + '.new')
+            raise Exception("can't write new pickle file")
+        else:
+            os.rename(pickle_path + '.new', pickle_path)
     
     def biome_data_available(self):
         """Check if any biome data is available
@@ -205,62 +218,109 @@ class RegionSet(object):
         """
         return chunkX//32, chunkY//32
     
-    def get_region_path(self, chunkX, chunkY):
+    def get_region_path_from_chunk(self, chunkX, chunkY):
+        """
+        """
+        return os.path.join(self.path, self.get_region_filename_from_chunk(
+            chunkX, chunkY))
+        
+    def get_region_filename_from_chunk(self, chunkX, chunkY):
         """
         """
         region_coords = self.get_region_coords_from_chunk(chunkX, chunkY)
-        return os.join(self.path, self.REGION_FILENAME_TPL %
-            (region_coords[0], region_coords[1], self.REGION_FILE_EXT))
+        return self.get_region_filename(region_coords[0], region_coords[1])
+        
+    def get_region_path(self, regionX, regionY):
+        """
+        """
+        return os.path.join(self.path, self.get_region_filename(regionX, regionY))
+    
+    def get_region_filename(self, regionX, regionY):
+        """
+        """
+        return self.REGION_FILENAME_TPL % (regionX, regionY)
     
     def get_chunk_relative(self, regionX, regionY, chunkX, chunkY):
+        """Get the (properly rotated) chunk data from a chunk by it's coords
+        relative to the region it's contained in
         """
-        """
-        chunk_data = None
-        region_info = self._get_region_info(regionX, regionY)
-        if region_info is not None:
-            chunks = region_info[2]
-            chunk_data = chunks.get((chunkX, chunkY))
-            if chunk_data is not None:
-                chunk_data = chunk_data[0]
+        #TODO this needs to be looked over, i suspect it is doing some silly things
+        # also, chunkX and chunkY should be constrained to [0, 32)
+        # this should probably tie into get_region as well
+        # this is probably almost completely unneccesary in light of the new get_region
+        
+        region_coords = (regionX, regionY)
+        chunk_coords = (chunkX, chunkY)
+        if chunk_coords not in self._region_cache[region_coords][2]:
+            try:
+                chunk_data = self.get_region(*region_coords).load_chunk(chunkX, chunkY).read_all()
+            except AttributeError:
+                self._region_cache[region_coords][2][chunk_coords] = self.EMPTY_CHUNK
             else:
-                if len(self._chunk_cache) > self.CHUNK_DATA_CACHE_LIMIT:
-                    chunk = self.get_region(regionX, regionY).load_chunk(chunkX, chunkY)
-                    if chunk is None:
-                        chunks[(chunkX, chunkY)] = self.EMPTY_CHUNK
-                        chunk_data = None
-                    else:
-                        north_rotations = self.get_north_rotations(self._config['north_direction'])
-                        data = chunk.read_all()
-                        level = data[1]['Level']
-                        chunk_data = level
-                        chunk_data['Blocks'] = numpy.array(numpy.rot90(
-                            numpy.frombuffer(level['Blocks'], dtype=numpy.uint8).reshape((16,16,128)),
-                                north_rotations))
-                        chunk_data['Data'] = numpy.array(numpy.rot90(
-                            numpy.frombuffer(level['Data'], dtype=numpy.uint8).reshape((16,16,64)),
-                                north_rotations))
-                        chunk_data['SkyLight'] = numpy.array(numpy.rot90(
-                            numpy.frombuffer(level['SkyLight'], dtype=numpy.uint8).reshape((16,16,64)),
-                                north_rotations))
-                        chunk_data['BlockLight'] = numpy.array(numpy.rot90(
-                            numpy.frombuffer(level['BlockLight'], dtype=numpy.uint8).reshape((16,16,64)),
-                                north_rotations()))
-                        chunks[(chunkX, chunkY)] = [level, time.time()]
-        return chunk_data
+                north_rotations = self.get_north_rotations(
+                    self._config['north_direction'])
+                level = chunk_data[1]['Level']
+                cache_data = level
+                cache_data['Blocks']
+                cache_data['Blocks'] = numpy.array(numpy.rot90(
+                    numpy.frombuffer(level['Blocks'], dtype=numpy.uint8).reshape((16,16,128)),
+                        north_rotations))
+                cache_data['Data'] = numpy.array(numpy.rot90(
+                    numpy.frombuffer(level['Data'], dtype=numpy.uint8).reshape((16,16,64)),
+                        north_rotations))
+                cache_data['SkyLight'] = numpy.array(numpy.rot90(
+                    numpy.frombuffer(level['SkyLight'], dtype=numpy.uint8).reshape((16,16,64)),
+                        north_rotations))
+                cache_data['BlockLight'] = numpy.array(numpy.rot90(
+                    numpy.frombuffer(level['BlockLight'], dtype=numpy.uint8).reshape((16,16,64)),
+                        north_rotations()))
+                self._region_cache[region_coords][2][chunk_coords] = cache_data
+        return self._region_cache[region_coords][2][chunk_coords]
     
     def get_chunk_absolute(self, chunkX, chunkY):
+        """Get the chunk data for a chunk by it's absolute coords
         """
-        """
-        #TODO this replaces World.load_from_region
         region_coords = self.get_region_coords_from_chunk(chunkX, chunkY)
         return self.get_chunk_relative(region_coords[0], region_coords[1],
             chunkX % 32, chunkY % 32)
     
-    def get_region(self, regionX, regionY):
+    #TODO use LRU decorator here? how to skip cache then?
+    def get_region(self, regionX, regionY, bypass_cache=False):
         """
         """
         #TODO replaces World.reload_region
-        pass
+        coords = (regionX, regionY)
+        if bypass_cache or coords not in self._region_cache:
+            if len(self._region_cache) > self.REGION_DATA_CACHE_LIMIT:
+                #TODO trim cache
+                pass
+            if bypass_cache and coords in self._region_cache:
+                self._region_cache[coords][0].closefile()
+                del self._region_cache[coords]
+                #need to clear chunk cache as well
+            #load into cache
+            region = nbt.MCRFileReader(
+                self.get_region_path(*coords), self._config['north_direction'])
+            region_mtime = None
+            region_chunk_cache = {}
+            #should biome data be in this?
+            self._region_cache[coords] = (region, region_mtime, region_chunk_cache)
+        return self._region_cache[coords]
+        
+    def get_region_data(self, regionX, regionY):
+        """
+        """
+        return self.get_region(regionX, regionY)[0]
+        
+    def get_region_mtime(self, regionX, regionY):
+        """
+        """
+        return self.get_region(regionX, regionY)[1]
+        
+    def get_region_chunks(self, regionX, regionY):
+        """
+        """
+        return self.get_region(regionX, regionY)[2]
         
     def get_spawn_point(self):
         """Get the spawn point from level.dat, this not necessarily where
