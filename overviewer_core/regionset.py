@@ -111,7 +111,6 @@ class RegionSet(object):
     
     #TODO persistent data stuff really belongs to the quadtree and should be
     #  moved there at some point
-    PERSISTENT_DATA_FILENAME    = 'overviewer.dat'
     REGION_FILENAME_TPL         = 'r.%d.%d.mcr'
     REGION_DATA_CACHE_LIMIT     = 256
     EMPTY_CHUNK                 = [None, None]
@@ -139,12 +138,6 @@ class RegionSet(object):
             raise Exception("RegionSet.path ({0}) not in World.path ({1})".format(
                 path, self.world))
         self.path = os.join(self.world.path, path)
-        self._persistent_data = self.DEFAULT_DATA
-        try:
-            self._persistent_data.update(self._read_persistent_data())
-        except: #TODO: what goes here? file not found?
-            logging.debug("Failed to load region set settings")
-        self._persistent_data.update(kwargs)
         self.bounds = self._find_bounds()
         self._region_cache = {}
             
@@ -159,39 +152,6 @@ class RegionSet(object):
             name = "world"
         return name
 
-    def _get_pickle_path(self):
-        """
-        """
-        #TODO this should actually pull from the output dir but we don't know
-        #  about it yet.
-        return os.path.join(self.path, self.PERSISTENT_DATA_FILENAME)
-        
-    def _read_persistent_data(self):
-        """Read persistent data from backing storage if available
-        """
-        data = {}
-        pickle_path = self._get_pickle_path()
-        with open(pickle_path, 'rb') as pickle_file:
-            data = cPickle.load(pickle_file)
-        return data
-        
-    def _write_persistent_data(self, data):
-        """Write the persistent data to backing storage.
-        """
-        pickle_path = self._get_pickle_path()
-        with open(pickle_path + '.new', 'wb') as pickle_file:
-            cPickle.dump(data, pickle_file)
-        try:
-            # Renames are not atomic on Windows and throw errors if the
-            #   destination already exists so we have to remove it first.
-            os.remove(pickle_path)
-        except OSError:
-            #TODO better exception here
-            os.remove(pickle_path + '.new')
-            raise Exception("can't write new pickle file")
-        else:
-            os.rename(pickle_path + '.new', pickle_path)
-    
     def biome_data_available(self):
         """Check if any biome data is available
         """
@@ -389,7 +349,12 @@ class RegionSet(object):
             max_column = max(max_column, column)
             min_row = min(min_row, row)
             max_row = max(max_row, row)
-        return min_column, max_column, min_row, max_row
+        return {
+            min_column=min_column,
+            max_column=max_column,
+            min_row=min_row,
+            max_row=min_row,
+        }
     
     def get_id_hash(self):
         """Get a hash representing a set config parameters. If this doesn't

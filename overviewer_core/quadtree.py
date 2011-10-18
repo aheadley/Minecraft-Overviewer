@@ -131,7 +131,7 @@ class QuadtreeGen(object):
 
     def _increase_depth(self):
         """Moves existing tiles into place for a larger tree"""
-        getpath = functools.partial(os.path.join, self.destdir, self.tiledir)
+        get_path = functools.partial(os.path.join, self.destdir, self.tiledir)
 
         # At top level of the tree:
         # quadrant 0 is now 0/3
@@ -143,22 +143,22 @@ class QuadtreeGen(object):
             newnum = (3,2,1,0)[dirnum]
 
             newdir = "new" + str(dirnum)
-            newdirpath = getpath(newdir)
+            newdirpath = get_path(newdir)
 
             files = [str(dirnum)+"."+self.imgformat, str(dirnum)]
             newfiles = [str(newnum)+"."+self.imgformat, str(newnum)]
 
             os.mkdir(newdirpath)
             for f, newf in zip(files, newfiles):
-                p = getpath(f)
+                p = get_path(f)
                 if os.path.exists(p):
-                    os.rename(p, getpath(newdir, newf))
-            os.rename(newdirpath, getpath(str(dirnum)))
+                    os.rename(p, get_path(newdir, newf))
+            os.rename(newdirpath, get_path(str(dirnum)))
 
     def _decrease_depth(self):
         """If the map size decreases, or perhaps the user has a depth override
         in effect, re-arrange existing tiles for a smaller tree"""
-        getpath = functools.partial(os.path.join, self.destdir, self.tiledir)
+        get_path = functools.partial(os.path.join, self.destdir, self.tiledir)
 
         # quadrant 0/3 goes to 0
         # 1/2 goes to 1
@@ -166,25 +166,25 @@ class QuadtreeGen(object):
         # 3/0 goes to 3
         # Just worry about the directories here, the files at the top two
         # levels are cheap enough to replace
-        if os.path.exists(getpath("0", "3")):
-            os.rename(getpath("0", "3"), getpath("new0"))
-            shutil.rmtree(getpath("0"))
-            os.rename(getpath("new0"), getpath("0"))
+        if os.path.exists(get_path("0", "3")):
+            os.rename(get_path("0", "3"), get_path("new0"))
+            shutil.rmtree(get_path("0"))
+            os.rename(get_path("new0"), get_path("0"))
 
-        if os.path.exists(getpath("1", "2")):
-            os.rename(getpath("1", "2"), getpath("new1"))
-            shutil.rmtree(getpath("1"))
-            os.rename(getpath("new1"), getpath("1"))
+        if os.path.exists(get_path("1", "2")):
+            os.rename(get_path("1", "2"), get_path("new1"))
+            shutil.rmtree(get_path("1"))
+            os.rename(get_path("new1"), get_path("1"))
 
-        if os.path.exists(getpath("2", "1")):
-            os.rename(getpath("2", "1"), getpath("new2"))
-            shutil.rmtree(getpath("2"))
-            os.rename(getpath("new2"), getpath("2"))
+        if os.path.exists(get_path("2", "1")):
+            os.rename(get_path("2", "1"), get_path("new2"))
+            shutil.rmtree(get_path("2"))
+            os.rename(get_path("new2"), get_path("2"))
 
-        if os.path.exists(getpath("3", "0")):
-            os.rename(getpath("3", "0"), getpath("new3"))
-            shutil.rmtree(getpath("3"))
-            os.rename(getpath("new3"), getpath("3"))
+        if os.path.exists(get_path("3", "0")):
+            os.rename(get_path("3", "0"), get_path("new3"))
+            shutil.rmtree(get_path("3"))
+            os.rename(get_path("new3"), get_path("3"))
         
     def go(self, procs):
         """Processing before tile rendering"""
@@ -484,3 +484,245 @@ class QuadtreeGen(object):
 
         if self.optimizeimg:
             optimize_image(imgpath, self.imgformat, self.optimizeimg)
+
+class QuadTreeGenerator(object):
+    """
+    """
+    
+    PERSISTENT_DATA_FILENAME    = 'overviewer.dat'
+    MAX_TREE_DEPTH              = 15
+
+    def __init__(self, region_set, dest_path, **kwargs):
+        """
+        """
+        self.region_set = region_set
+        self.dest_path = dest_path
+        self._depth = kwargs.get('depth', None)
+        if self._depth is None:
+            #we didn't get a depth so we need to figure it out
+            for tree_depth in xrange(self.MAX_TREE_DEPTH):
+                # Will 2^p tiles wide and high suffice?
+                # X has twice as many chunks as tiles, then halved since this is a
+                # radius
+                radiusX = 2 ** tree_depth
+                # Y has 4 times as many chunks as tiles, then halved since this is
+                # a radius
+                radiusY = 2 * 2 ** tree_depth
+                if  radiusX >= self.region_set.bounds['max_column'] and \
+                    -radiusX <= self.region_set.bounds['min_column'] and \
+                    radiusY >= self.region_set.bounds['max_row'] and \
+                    -radiusY <= self.region_set.bounds['min_row']:
+                    break
+            self._depth = tree_depth
+        else:
+            radiusX = 2 ** self._depth
+            radiusY = 2 * 2 ** self._depth
+
+        self._persistent_data = self.DEFAULT_DATA
+        try:
+            self._persistent_data.update(self._read_persistent_data())
+        except: #TODO: what goes here? file not found?
+            logging.debug("Failed to load region set settings")
+        #TODO this doesn't handle north_direction conflicts at all
+        self._persistent_data.update(kwargs)
+    
+    def pre_process(self):
+        """Process the tile directory tree before we render
+        """
+        current_depth = self._get_current_depth()
+        if current_depth is not None and current_depth is not self._depth:
+            logging.warning("Your map has changed size, re-arranging tiles...")
+            if self._depth > current_depth:
+                logging.warning("Expansion detected, increasing tree depth...")
+                for _ in xrange(self._depth - current_depth):
+                    self._increase_depth()
+            elif self._depth < current_depth:
+                logging.warning("Shrinkage detected, decreasing tree depth...")
+                for _ in xrange(current_depth - self._depth):
+                    self._decrease_depth()
+    
+    def iterate_world_tiles(self):
+        """An iterator for the tiles at the lowest (most detailed) layer. These
+        are the tiles that are generated from scratch instead of stiched together.
+        """
+        #replaces QuadtreeGen.get_worldtiles
+        for path in iterate_base4(self._depth):
+            column_start, row_start = self._get_chunk_coords_by_path(path)
+            column_end = column_start + 2
+            row_end = row_start + 4
+            
+            tile_path = os.path.join(map(str, path))
+            #TODO why is self in here?
+            yield [self, column_start, column_end, row_start, row_end, tile_path]
+    
+    def iterate_composed_tiles(self, level):
+        """An iterator for all but the lowest level of tiles. These are the tiles
+        that are stiched together from the lowest level of tiles.
+        """
+        #replaces QuadtreeGen.get_innertiles
+        #TODO should check that level != self._depth ?
+        for path in iterate_base4(level):
+            tile_path = os.path.join(map(str, path[:-1]))
+            name = str(path[-1])
+            yield [self, tile_path, name]
+    
+    def render_composed_tile(self, path):
+        """
+        """
+        #replaces QuadtreeGen.render_innertile
+        pass
+    
+    def render_world_tile(self, chunks, column_start, column_end, row_start,
+            row_end):
+        """
+        """
+        #replaces QuadtreeGen.render_worldtile
+        pass
+    
+    def _get_persistent_data_path(self):
+        """
+        """
+        return os.path.join(self.dest_path, self.PERSISTENT_DATA_FILENAME)
+    
+    def _read_persistent_data(self):
+        """Read persistent data from backing storage if available
+        """
+        data = {}
+        pd_path = self._get_persistent_data_path()
+        with open(pd_path, 'rb') as pd_file:
+            data = cPickle.load(pd_file)
+        return data
+        
+    def _write_persistent_data(self, data):
+        """Write the persistent data to backing storage.
+        """
+        pd_path = self._get_persistent_data_path()
+        with open(pd_path + '.new', 'wb') as pd_file:
+            cPickle.dump(data, pd_file)
+        try:
+            # Renames are not atomic on Windows and throw errors if the
+            #   destination already exists so we have to remove it first.
+            os.remove(pd_path)
+        except OSError:
+            #TODO better exception here
+            os.remove(pd_path + '.new')
+            raise Exception("can't write new pd_file")
+        else:
+            os.rename(pd_path + '.new', pd_path)
+    
+    def _get_current_depth(self):
+        """
+        """
+        return self._persistent_data['tree_depth']
+    
+    def _increase_depth(self):
+        """Moves existing tiles into place for a larger tree
+        """
+        get_path = functools.partial(os.path.join, self.dest_path)
+
+        # At top level of the tree:
+        # quadrant 0 is now 0/3
+        # 1 is now 1/2
+        # 2 is now 2/1
+        # 3 is now 3/0
+        # then all that needs to be done is to regenerate the new top level
+        for i in range(4):
+            new_i = (3,2,1,0)[i]
+            new_dirname = 'new' + str(i)
+            new_dirpath = get_path(new_dirname)
+            filenames = ['%d.%s' % (i, self._persistent_data['img_format'], str(i)]
+            new_filenames = ['%d.%s' % (new_i, self._persistent_data['img_format'], str(new_i)]
+            
+            os.mkdir(new_dirpath)
+            for filename, new_filename in zip(filenames, new_filenames):
+                file_path = get_path(filename)
+                if os.path.exists(file_path):
+                    os.rename(file_path, get_path(new_dirname, new_filename))
+            os.rename(new_dirpath, get_path(str(i)))
+    
+    def _decrease_depth(self):
+        """If the map size decreases, or perhaps the user has a depth override
+        in effect, re-arrange existing tiles for a smaller tree
+        """
+        get_path = functools.partial(os.path.join, self.dest_path)
+
+        # quadrant 0/3 goes to 0
+        # 1/2 goes to 1
+        # 2/1 goes to 2
+        # 3/0 goes to 3
+        # Just worry about the directories here, the files at the top two
+        # levels are cheap enough to replace
+        if os.path.exists(get_path('0', '3')):
+            os.rename(get_path('0', '3'), get_path('new0'))
+            shutil.rmtree(get_path('0'))
+            os.rename(get_path('new0'), get_path('0'))
+
+        if os.path.exists(get_path('1', '2')):
+            os.rename(get_path('1', '2'), get_path('new1'))
+            shutil.rmtree(get_path('1'))
+            os.rename(get_path('new1'), get_path('1'))
+
+        if os.path.exists(get_path('2', '1')):
+            os.rename(get_path('2', '1'), get_path('new2'))
+            shutil.rmtree(get_path('2'))
+            os.rename(get_path('new2'), get_path('2'))
+
+        if os.path.exists(get_path('3', '0')):
+            os.rename(get_path('3', '0'), get_path('new3'))
+            shutil.rmtree(get_path('3'))
+            os.rename(get_path('new3'), get_path('3'))
+    
+    def _get_chunks_in_range_diag(self, column_start, column_end, row_start, row_end):
+        """
+        """
+        #replaces QuadtreeGen.get_chunks_in_range
+        chunk_list = []
+        get_chunk_coords = self.region_set.get_chunk_coords_from_diag
+        get_region_coords = self.region_set.get_region_coords_from_chunk
+        get_region = self.region_set.get_region
+        get_chunk = self.region_set.get_chunk_absolute
+        regionX = regionY = chunk = region_data = None
+        
+        for row in xrange(row_start - 16, row_end + 1):
+            for column in xrange(column_start, column_end + 1):
+                # due to how chunks are arranged, we can only allow
+                # even row, even column or odd row, odd column
+                # otherwise, you end up with duplicates!
+                if row % 2 is not column % 3:
+                    continue
+                else:
+                    chunkX, chunkY = get_chunk_coords(column, row)
+                    #TODO this doesn't really handle chunks that don't exist
+                    chunk_list.append((column, row, chunkX, chunkY,
+                        get_chunk(chunkX, chunkY)))
+        return chunk_list
+    
+    def _get_chunk_coords_by_path(self, path):
+        """Get the x,y chunk coords of a tile
+        """
+        max_bounds = self._get_bounds_by_depth(self._depth)
+        x = max_bounds['min_column']
+        y = max_bounds['min_row']
+        sizeX = max_bounds['max_column']
+        sizeY = max_bounds['max_row']
+        
+        for branch in path:
+            if branch in (1,3):
+                x += sizeX
+            if branch in (2,3):
+                y += sizeY
+            sizeX //= 2
+            sizeY //= 2
+        
+        return x, y
+    
+    def _get_bounds_by_depth(self, depth):
+        """
+        """
+        return {
+            'min_column': -2 ** depth,
+            'max_column': 2 ** depth,
+            'min_row':    -2 * 2 ** depth,
+            'max_row':    2 * 2 ** depth,
+        }
+    
