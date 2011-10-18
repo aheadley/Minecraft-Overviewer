@@ -35,6 +35,8 @@ class World(object):
     #TODO dict-like region set access?
 
     LEVEL_FILE          = 'level.dat'
+    #TODO document this, not sure what it is
+    DATA_VERSION        = 19132
     BIOME_FILENAME_TPL  = 'b.%d.%d.biome'
     BIOME_DIR_NAME      = 'biomes'
 
@@ -43,6 +45,11 @@ class World(object):
         self._region_sets = dict(map(
             lambda region_set: return (region_set.name, region_set),
             self._get_region_sets()))
+        self._data = nbt.load(os.path.join(self.path, self.LEVEL_FILE))[0]['Data']
+        if not self._check_data_version():
+            #TODO better way to handle this (VersionException or something)
+            logging.error("Sorry, This version of Minecraft-Overviewer only works with the new McRegion chunk format")
+            raise Exception("exit 1")
 
     def get_region_set(self, name):
         """Get a RegionSet object by region name.
@@ -93,6 +100,9 @@ class World(object):
             region_sets.append(RegionSet(self,
                 path, self._config.get('region_set_config', {})))
         return region_sets
+        
+    def _check_data_version(self):
+        return 'version' in data and data['version'] == self.DATA_VERSION
             
 class RegionSet(object):
     """Represents the set of region files that make up a single dimension in a
@@ -100,17 +110,24 @@ class RegionSet(object):
     """
     
     SETTINGS_FILE       = 'overviewer.dat'
-    #these should probably be filename templates
     REGION_FILENAME_TPL = 'r.%d.%d.mcr'
-
-    DEFAULT_DATA        = {}
+    DEFAULT_DATA        = {
+        'north_direction': 'lower-left',
+    }
+    REGION_FILE_LIMIT           = 256
+    CHUNK_DATA_CACHE_LIMIT      = 1024
+    EMPTY_CHUNK                 = [None, None]
+    NORTH_ROTATIONS             = {
+        'lower-left': 0,
+        'upper-left': 1,
+        'upper-right': 2,
+        'lower-right': 3,
+    }
     
-    REGION_FILE_LIMIT   = 256
-    #TODO i don't even know what these are used for
-    CHUNK_X_LIMIT       = 1024
-    
-    def __init__(self, world, path, **kwargs):
+    def __init__(self, world, name, **kwargs):
         self.world = world
+        self.name = name
+        self.path = os.path.join(
         self.name = self._get_name(path)
         if self.world.path[:len(path)] == path:
             self.path = path
@@ -128,6 +145,7 @@ class RegionSet(object):
             logging.debug("Failed to load region set settings")
         self._persistent_data.update(kwargs)
         self.bounds = self._find_bounds()
+        self._chunk_cache = []
             
     def _get_name(self, path):
         """Get the actual name of a world from the level.dat file
@@ -181,24 +199,68 @@ class RegionSet(object):
     def get_region_paths(self):
         return glob.glob(os.path.join(
             self.path, self.REGION_FILENAME_TPL.replace('%d', '*'))
+            
+    def get_region_coords_from_chunk(self, chunkX, chunkY):
+        """Convert chunk coords into the containing region coords
+        """
+        return chunkX//32, chunkY//32
     
     def get_region_path(self, chunkX, chunkY):
         """
         """
-        return os.join(self.path,
-            self.REGION_FILENAME_TPL %
-                (chunkX//32, chunkY//32, self.REGION_FILE_EXT))
+        region_coords = self.get_region_coords_from_chunk(chunkX, chunkY)
+        return os.join(self.path, self.REGION_FILENAME_TPL %
+            (region_coords[0], region_coords[1], self.REGION_FILE_EXT))
     
-    def get_chunk(self, chunkX, chunkY):
+    def get_chunk_relative(self, regionX, regionY, chunkX, chunkY):
+        """
+        """
+        chunk_data = None
+        region_info = self._get_region_info(regionX, regionY)
+        if region_info is not None:
+            chunks = region_info[2]
+            chunk_data = chunks.get((chunkX, chunkY))
+            if chunk_data is not None:
+                chunk_data = chunk_data[0]
+            else:
+                if len(self._chunk_cache) > self.CHUNK_DATA_CACHE_LIMIT:
+                    chunk = self.get_region(regionX, regionY).load_chunk(chunkX, chunkY)
+                    if chunk is None:
+                        chunks[(chunkX, chunkY)] = self.EMPTY_CHUNK
+                        chunk_data = None
+                    else:
+                        north_rotations = self.get_north_rotations(self._config['north_direction'])
+                        data = chunk.read_all()
+                        level = data[1]['Level']
+                        chunk_data = level
+                        chunk_data['Blocks'] = numpy.array(numpy.rot90(
+                            numpy.frombuffer(level['Blocks'], dtype=numpy.uint8).reshape((16,16,128)),
+                                north_rotations))
+                        chunk_data['Data'] = numpy.array(numpy.rot90(
+                            numpy.frombuffer(level['Data'], dtype=numpy.uint8).reshape((16,16,64)),
+                                north_rotations))
+                        chunk_data['SkyLight'] = numpy.array(numpy.rot90(
+                            numpy.frombuffer(level['SkyLight'], dtype=numpy.uint8).reshape((16,16,64)),
+                                north_rotations))
+                        chunk_data['BlockLight'] = numpy.array(numpy.rot90(
+                            numpy.frombuffer(level['BlockLight'], dtype=numpy.uint8).reshape((16,16,64)),
+                                north_rotations()))
+                        chunks[(chunkX, chunkY)] = [level, time.time()]
+        return chunk_data
+    
+    def get_chunk_absolute(self, chunkX, chunkY):
         """
         """
         #TODO this replaces World.load_from_region
-        return None
-        
-    def reload_region(self, regionX, regionY):
+        region_coords = self.get_region_coords_from_chunk(chunkX, chunkY)
+        return self.get_chunk_relative(region_coords[0], region_coords[1],
+            chunkX % 32, chunkY % 32)
+    
+    def get_region(self, regionX, regionY):
         """
         """
         #TODO replaces World.reload_region
+        pass
         
     def get_spawn_point(self):
         """Get the spawn point from level.dat, this not necessarily where
@@ -215,11 +277,36 @@ class RegionSet(object):
         #TODO replaces World.findTrueSpawn
         return self.get_spawn_point()
         
-    def _find_bounds(self):
+    def get_north_rotations(self, direction):
+        """Translate a north direction into the rotations needed
         """
+        #TODO verify default is what it should be
+        return self.NORTH_ROTATIONS.get(direction, 1)
+        
+    #TODO these should probably be class methods
+    def get_diag_coords_from_chunk(self, chunkX, chunkY):
+        """Takes a coordinate (chunkx, chunky) where chunkx and chunky are
+        in the chunk coordinate system, and figures out the row and column
+        in the image each one should be. Returns (col, row).
+        """
+        # columns are determined by the sum of the chunk coords, rows are the
+        # difference
+        return chunkX + chunkY, chunkY - chunkX
+    
+    def get_chunk_coords_from_diag(self, column, row):
+        """Inverse of get_diag_coords_from_chunk()
+        """
+        return (column - row) / 2, (column + row) / 2
+        
+    def _find_bounds(self):
+        """Find the min/max of the x,y of chunks in the region set
+        
+        Note that these chunks may not actually exists, only that there is at
+        least one region that could contain a chunk at these values.
         """
         #TODO this probably replaces World.go which is a stupid name
         #also, figure out how to handle regionlist
+        #also, maybe faster to 
         minX = maxX = minY = maxY = 0
         for regionX, regionY in self._region_file_iterator():
             minX = min(minX, regionX)
@@ -230,8 +317,19 @@ class RegionSet(object):
             logging.error("No regions found")
             #TODO handle this better
             raise Exception("exit 1")
-        else:
-            
+        min_chunkX = minX * 32
+        max_chunkX = maxX * 32 + 32
+        min_chunkY = minY * 32
+        max_chunkY = maxY * 32 + 32
+        
+        min_column = max_column = min_row = max_row = 0
+        for chunkX, chunkY in [(minX, minY), (minX, maxY), (maxX, minY), (maxX, maxY)]:
+            column, row = self.get_diag_coords_from_chunk(chunkX, chunkY)
+            min_column = min(min_column, column)
+            max_column = max(max_column, column)
+            min_row = min(min_row, row)
+            max_row = max(max_row, row)
+        return min_column, max_column, min_row, max_row
     
     def get_id_hash(self):
         """Get a hash representing a set config parameters. If this doesn't
