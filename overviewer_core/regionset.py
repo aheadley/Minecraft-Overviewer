@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #    This file is part of the Minecraft Overviewer.
 #
 #    Minecraft Overviewer is free software: you can redistribute it and/or
@@ -103,6 +104,16 @@ class World(object):
         
     def _check_data_version(self):
         return 'version' in data and data['version'] == self.DATA_VERSION
+
+    def get_spawn_point(self):
+        """Get the spawn point from level.dat, this not necessarily where
+        the player marker will be placed and will likely differ slightly from
+        where players actually spawn.
+        """
+        #TODO implement this
+        data = nbt.load(os.path.join(self.path, self.LEVEL_FILE))[1]['Data']
+        return map(int,[data['SpawnX'], data['SpawnY'], data['SpawnZ']])
+
             
 class RegionSet(object):
     """Represents the set of region files that make up a single dimension in a
@@ -123,6 +134,14 @@ class RegionSet(object):
         'upper-right': 2,
         'lower-right': 3,
     }
+
+    #this may make alternate chunk/region sizes easier to deal with in the future
+    #TODO actually change stuff to use these. though they should probably go somewhere else
+    _CHUNK_WIDTH                = 16
+    _CHUNK_HEIGHT               = 16
+    _CHUNK_DEPTH                = 128
+    _REGION_WIDTH               = 32
+    _REGION_HEIGHT              = 32
     
     def __init__(self, world, name, **kwargs):
         self.world = world
@@ -282,20 +301,12 @@ class RegionSet(object):
         """
         return self.get_region(regionX, regionY)[2]
         
-    def get_spawn_point(self):
-        """Get the spawn point from level.dat, this not necessarily where
-        the player marker will be placed and will likely differ slightly from
-        where players actually spawn.
-        """
-        #TODO implement this
-        return (0,0,0)
-        
     def get_spawn_POI(self):
         """Get the point where players are actually likely to spawn and where
         the spawn marker should be placed.
         """
         #TODO replaces World.findTrueSpawn
-        return self.get_spawn_point()
+        return self.world.get_spawn_point()
         
     def get_north_rotations(self, direction):
         """Translate a north direction into the rotations needed
@@ -369,7 +380,6 @@ class RegionSet(object):
         """Iterates over region filenames in the set returning their coords
         """
         #TODO add some validation
-        temp = 0
         for region_filename in map(os.path.basename,
                 self.get_region_paths() if region_paths is None else region_paths)
             regionX, regionY = map(int, region_filename.split('.')[1:3])
