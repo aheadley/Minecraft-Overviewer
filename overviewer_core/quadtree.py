@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #    This file is part of the Minecraft Overviewer.
 #
 #    Minecraft Overviewer is free software: you can redistribute it and/or
@@ -295,31 +296,31 @@ class QuadtreeGen(object):
        
         #stat the tile, we need to know if it exists or it's mtime
         try:    
-            tile_mtime =  os.stat(imgpath)[stat.ST_MTIME];
+            img_mtime =  os.stat(imgpath)[stat.ST_MTIME];
         except OSError, e:
             if e.errno != errno.ENOENT:
                 raise
-            tile_mtime = None
+            img_mtime = None
             
         #check mtimes on each part of the quad, this also checks if they exist
-        needs_rerender = (tile_mtime is None) or self.forcerender
+        rerender = (img_mtime is None) or self.forcerender
         quadPath_filtered = []
         for path in quadPath:
             try:
                 quad_mtime = os.stat(path[1])[stat.ST_MTIME]; 
                 quadPath_filtered.append(path)
-                if quad_mtime > tile_mtime:     
-                    needs_rerender = True            
+                if quad_mtime > img_mtime:
+                    rerender = True
             except OSError:
                 # We need to stat all the quad files, so keep looping
                 pass      
         # do they all not exist?
         if quadPath_filtered == []:
-            if tile_mtime is not None:
+            if img_mtime is not None:
                 os.unlink(imgpath)
             return
         # quit now if we don't need rerender
-        if not needs_rerender:
+        if not rerender:
             return    
         #logging.debug("writing out innertile {0}".format(imgpath))
 
@@ -397,15 +398,15 @@ class QuadtreeGen(object):
         world = self.world
         #stat the file, we need to know if it exists or it's mtime
         try:    
-            tile_mtime =  os.stat(imgpath)[stat.ST_MTIME];
+            img_mtime =  os.stat(imgpath)[stat.ST_MTIME];
         except OSError, e:
             if e.errno != errno.ENOENT:
                 raise
-            tile_mtime = None
+            img_mtime = None
             
         if not chunks:
             # No chunks were found in this tile
-            if tile_mtime is not None:
+            if img_mtime is not None:
                 os.unlink(imgpath)
             return None
 
@@ -423,7 +424,7 @@ class QuadtreeGen(object):
         
         # check chunk mtimes to see if they are newer
         try:
-            needs_rerender = False
+            rerender = False
             get_region_mtime = world.get_region_mtime
             for col, row, chunkx, chunky, regionfile in chunks:
                 region, regionMtime = get_region_mtime(regionfile)
@@ -434,20 +435,20 @@ class QuadtreeGen(object):
 
                 # bail early if forcerender is set
                 if self.forcerender:
-                    needs_rerender = True
+                    rerender = True
                     break
                 
                 # check region file mtime first. 
-                if regionMtime <= tile_mtime:
+                if regionMtime <= img_mtime:
                     continue
                
                 # checking chunk mtime
-                if region.get_chunk_timestamp(chunkx, chunky) > tile_mtime:
-                    needs_rerender = True
+                if region.get_chunk_timestamp(chunkx, chunky) > img_mtime:
+                    rerender = True
                     break
             
             # if after all that, we don't need a rerender, return
-            if not needs_rerender:
+            if not rerender:
                 return None
         except OSError:
             # couldn't get tile mtime, skip check
@@ -491,9 +492,17 @@ class QuadTreeGenerator(object):
     
     PERSISTENT_DATA_FILENAME    = 'overviewer.dat'
     MAX_TREE_DEPTH              = 15
+    #TODO these should probably be module constants/globals/whatever
+    TILE_SIZE                   = 384
+    HALF_TILE_SIZE              = self.TILE_SIZE // 2
+    QTR_TILE_SIZE               = self.TILE_SIZE // 4
 
     def __init__(self, region_set, dest_path, **kwargs):
-        """
+        """Generates a quadtree from the world given into the given destination
+        directory
+
+        If depth is given, it overrides the calculated value. Otherwise, the
+        minimum depth that contains all chunks is calculated and used.
         """
         self.region_set = region_set
         self.dest_path = dest_path
@@ -501,7 +510,7 @@ class QuadTreeGenerator(object):
         if self._depth is None:
             #we didn't get a depth so we need to figure it out
             for tree_depth in xrange(self.MAX_TREE_DEPTH):
-                # Will 2^p tiles wide and high suffice?
+                # Will 2^tree_depth tiles wide and high suffice?
                 # X has twice as many chunks as tiles, then halved since this is a
                 # radius
                 radiusX = 2 ** tree_depth
@@ -513,6 +522,10 @@ class QuadTreeGenerator(object):
                     radiusY >= self.region_set.bounds['max_row'] and \
                     -radiusY <= self.region_set.bounds['min_row']:
                     break
+            else:
+                logging.error("Your map is waaaay too big! Use the 'zoom' \
+option in 'settings.py'.")
+                raise ValueError("Tree depth limit reached while trying to fit map")
             self._depth = tree_depth
         else:
             radiusX = 2 ** self._depth
@@ -566,19 +579,166 @@ class QuadTreeGenerator(object):
             name = str(path[-1])
             yield [self, tile_path, name]
     
-    def render_composed_tile(self, path):
+    def render_composed_tile(self, path, force=False):
         """
         """
         #replaces QuadtreeGen.render_innertile
-        pass
+        img_format = self._persistent_data['img_format']
+        img_name = '%d.%s' % (path[-1], img_format)
+        img_path = os.path.join(self.dest_path, os.path.join(path[:-1]), img_name)
+
+        if path is not None:
+            target_dirname = os.path.dirname(img_path)
+        else:
+            #base image
+            target_dirname = self.dest_path
+        quad_img_paths = [
+            [(0, 0),
+                os.path.join(target_dirname, '0.' + img_format)],
+            [(self.TILE_SIZE, 0),
+                os.path.join(target_dirname, '1.' + img_format)],
+            [(0, self.TILE_SIZE),
+                os.path.join(target_dirname, '2.' + img_format)],
+            [(self.TILE_SIZE, self.TILE_SIZE),
+                os.path.join(target_dirname, '3.' + img_format)],
+        ]
+        #stat the tile, we need to know if it exists or it's mtime
+        try:
+            img_mtime =  os.stat(img_path)[stat.ST_MTIME];
+        except OSError, e:
+            if e.errno != errno.ENOENT:
+                raise
+            img_mtime = None
+
+        #check mtimes on each part of the quad, this also checks if they exist
+        rerender = img_mtime is None or force
+        quad_img_paths_filtered = []
+        for quad_img_path in quad_img_paths:
+            try:
+                quad_img_mtime = os.stat(quad_img_path[1])[stat.ST_MTIME];
+                quad_img_paths_filtered.append(quad_img_path)
+                if quad_img_mtime > img_mtime:
+                    rerender = True
+            except OSError:
+                # We need to stat all the quad files, so keep looping
+                pass
+            
+        if not quad_img_paths_filtered:
+            # none of the child images exist so this tile shouldn't either
+            if img_mtime is not None:
+                os.unlink(img_path)
+            return
+        elif not rerender:
+            # quit now if we don't need rerender
+            return
+        else:
+            # Create the actual image now
+            img = Image.new('RGBA', (self.TILE_SIZE, self.TILE_SIZE),
+                self._persistent_data['bg_color'])
+
+            # we'll use paste (NOT alpha_over) for quadtree generation because
+            # this is just straight image stitching, not alpha blending
+            for quad_path in quad_img_paths_filtered:
+                try:
+                    quad_img = Image.open(quad_path[1]).resize(
+                        (self.HALF_TILE_SIZE, self.HALF_TILE_SIZE), Image.ANTIALIAS)
+                    img.paste(quad_img, quad_path[0])
+                #TODO better exception here
+                except Exception, e:
+                    logging.warning("Couldn't open %s. It may be corrupt, you \
+may need to delete it. %s", quad_path[1], e)
+
+            # Save it
+            self._img_save(img, img_path)
+            #TODO post tile render hook here
     
     def render_world_tile(self, chunks, column_start, column_end, row_start,
-            row_end):
+            row_end, path, force=False):
         """
         """
         #replaces QuadtreeGen.render_worldtile
-        pass
-    
+        img_width = self.HALF_TILE_SIZE * (column_end - column_start)
+        img_height = self.HALF_TILE_SIZE * (row_end - row_start)
+        img_filename = '%d.%s' % (path[-1], self._persistent_data['img_format'])
+        img_path = os.path.join(self.dest_path, os.path.join(path[:-1]), img_filename)
+        img_dirname = os.path.dirname(img_path)
+
+        #stat the file, we need to know if it exists or it's mtime
+        try:
+            img_mtime =  os.stat(img_path)[stat.ST_MTIME];
+        except OSError, e:
+            if e.errno != errno.ENOENT:
+                raise
+            img_mtime = None
+
+        if not chunks:
+            # No chunks were found in this tile
+            if img_mtime is not None:
+                os.unlink(img_path)
+            return
+
+        # Create the directory if not exists
+        if not os.path.exists(img_dirname):
+            try:
+                os.makedirs(img_dirname)
+            except OSError, e:
+                # Ignore errno EEXIST: file exists. Since this is multithreaded,
+                # two processes could conceivably try and create the same directory
+                # at the same time.
+                if e.errno != errno.EEXIST:
+                    raise
+
+        # check chunk mtimes to see if they are newer
+        rerender = force
+        if not rerender:
+            for column, row, chunkX, chunkY in chunks:
+                region_coords = self.region_set.get_region_coords_from_chunk(
+                    chunkX, chunkY)
+                try:
+                    region_data = self.region_set.get_region(*region_coords)
+                except OSError:
+                    continue
+                # don't even check if it's not in the regionlist
+                if  self.region_list and \
+                    self.region_set.get_region_filename(*region_coords) \
+                        not in self.region_list:
+                    continue
+
+                # check region file mtime first.
+                if region_data[1] <= img_mtime:
+                    continue
+
+                if region_data[0].get_chunk_timestamp(chunkX, chunkY) > img_mtime:
+                    rerender = True
+                    break
+
+        if not rerender:
+            return
+            
+        # Compile this image
+        img = Image.new('RGBA', (img_width, img_height),
+            self._persistent_data['bg_color'])
+
+        rendermode = self.rendermode
+        # col colstart will get drawn on the image starting at x coordinates -(384/2)
+        # row rowstart will get drawn on the image starting at y coordinates -(192/2)
+        for column, row, chunkX, chunkY in chunks:
+            posX = -self.HALF_TILE_SIZE + (column - column_start) * self.HALF_TILE_SIZE
+            posY = -self.QTR_TILE_SIZE + (row - row_start) * self.QTR_TILE_SIZE
+            # draw the chunk!
+            try:
+                renderer = chunk.ChunkRenderer((chunkX, chunkY), self.region_set,
+                    render_mode)
+                renderer.chunk_render(img, posX, posY, None)
+            except chunk.ChunkCorrupt:
+                # an error was already printed
+                #TODO stick warning sign in instead of chunk image maybe?
+                pass
+
+        # Save them
+        self._img_save(img, img_path)
+        #TODO post tile render hook here
+
     def _get_persistent_data_path(self):
         """
         """
@@ -725,4 +885,12 @@ class QuadTreeGenerator(object):
             'min_row':    -2 * 2 ** depth,
             'max_row':    2 * 2 ** depth,
         }
+    def _save_image(img, img_path):
+        """
+        """
+        if self._persistent_data['img_format'] == 'jpg':
+            img.save(img_path, quality=self._persistent_data['img_quality'],
+                subsampling=self.JPG_SUBSAMPLING)
+        else:
+            img.save(img_path)
     
