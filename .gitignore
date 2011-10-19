@@ -9,6 +9,9 @@ cachedir*
 # vim swap files
 .*.swp
 
+# more editor garbage
+.idea/*
+
 # user-provided settings file
 settings.py
 
