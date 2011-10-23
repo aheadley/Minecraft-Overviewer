@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #    This file is part of the Minecraft Overviewer.
 #
 #    Minecraft Overviewer is free software: you can redistribute it and/or
@@ -26,7 +27,7 @@ from PIL import Image, ImageEnhance, ImageOps, ImageDraw
 import logging
 
 import util
-import composite
+import c_overviewer as composite
 
 _find_file_local_path = None
 def _find_file(filename, mode="rb", verbose=False):

@@ -3,4 +3,5 @@ __all__ = [
     'util',
     'render',
     'minecraft',
+    'config_parser',
 ]

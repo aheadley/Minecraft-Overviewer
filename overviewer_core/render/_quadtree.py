@@ -24,7 +24,8 @@ import shutil
 import collections
 import json
 import logging
-import util
+#TODO not sure this is right
+from .. import util
 import cPickle
 import stat
 import errno 
@@ -33,11 +34,10 @@ from time import gmtime, strftime, sleep
 
 from PIL import Image
 
-import nbt
-import chunk
-from c_overviewer import get_render_mode_inheritance
-from optimizeimages import optimize_image
-import composite
+from ..minecraft import nbt
+from .. import render
+from ..render.c_overviewer import get_render_mode_inheritance
+from ..render import optimize_image
 
 
 """
@@ -45,10 +45,6 @@ This module has routines related to generating a quadtree of tiles
 
 """
 
-def iterate_base4(d):
-    """Iterates over a base 4 number with d digits"""
-    return itertools.product(xrange(4), repeat=d)
-   
 class QuadTreeGenerator(object):
     """
     """
@@ -59,6 +55,13 @@ class QuadTreeGenerator(object):
     TILE_SIZE                   = 384
     HALF_TILE_SIZE              = self.TILE_SIZE // 2
     QTR_TILE_SIZE               = self.TILE_SIZE // 4
+    TILE_IMG_FORMATS            = ('jpg', 'png')
+
+    @staticmethod
+    def iterate_base4(d):
+        """Iterates over a base 4 number with d digits
+        """
+        return itertools.product(xrange(4), repeat=d)
 
     def __init__(self, region_set, dest_path, **kwargs):
         """Generates a quadtree from the world given into the given destination
@@ -122,7 +125,7 @@ option in 'settings.py'.")
         are the tiles that are generated from scratch instead of stiched together.
         """
         #replaces QuadtreeGen.get_worldtiles
-        for path in iterate_base4(self._depth):
+        for path in self.iterate_base4(self._depth):
             column_start, row_start = self._get_chunk_coords_by_path(path)
             column_end = column_start + 2
             row_end = row_start + 4
@@ -137,10 +140,15 @@ option in 'settings.py'.")
         """
         #replaces QuadtreeGen.get_innertiles
         #TODO should check that level != self._depth ?
-        for path in iterate_base4(level):
+        for path in self.iterate_base4(level):
             tile_path = os.path.join(map(str, path[:-1]))
             name = str(path[-1])
             yield [self, tile_path, name]
+
+    def get_depth(self):
+        """
+        """
+        return self._depth
     
     def render_composed_tile(self, path, force=False):
         """Renders a tile at os.path.join(dest, name)+".ext" by taking tiles
@@ -149,7 +157,7 @@ option in 'settings.py'.")
         #replaces QuadtreeGen.render_innertile
         img_format = self._persistent_data['img_format']
         img_name = '%d.%s' % (path[-1], img_format)
-        img_path = os.path.join(self.dest_path, os.path.join(path[:-1]), img_name)
+        img_path = os.path.join(self.dest_path, *map(str,path[:-1]), img_name)
 
         if path is not None:
             target_dirname = os.path.dirname(img_path)
@@ -216,8 +224,8 @@ may need to delete it. %s", quad_path[1], e)
             self._img_save(img, img_path)
             #TODO post tile render hook here
     
-    def render_world_tile(self, chunks, column_start, column_end, row_start,
-            row_end, path, force=False):
+    def render_world_tile(self, column_start, column_end, row_start, row_end,
+        path, force=False):
         """Renders just the specified chunks into a tile and save it. Unlike usual
         python conventions, rowend and colend are inclusive. Additionally, the
         chunks around the edges are half-way cut off (so that neighboring tiles
@@ -265,8 +273,11 @@ may need to delete it. %s", quad_path[1], e)
         # anyways just in case). "chunks" should include up to rowstart-16
 
         img_filename = '%d.%s' % (path[-1], self._persistent_data['img_format'])
-        img_path = os.path.join(self.dest_path, os.path.join(path[:-1]), img_filename)
+        img_path = os.path.join(self.dest_path, *map(str,path[:-1]), img_filename)
         img_dirname = os.path.dirname(img_path)
+
+        chunks = self.get_chunks_in_range(column_start, column_end, row_start,
+            row_end)
 
         #stat the file, we need to know if it exists or it's mtime
         try:

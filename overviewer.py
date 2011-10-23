@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 #    This file is part of the Minecraft Overviewer.
 #
@@ -30,15 +31,15 @@ import multiprocessing
 import time
 import logging
 import platform
-from overviewer_core import util
+import overviewer_core.util
 
 logging.basicConfig(level=logging.INFO,format="%(asctime)s [%(levelname)s] %(message)s")
 
-this_dir = util.get_program_path()
+this_dir = overviewer_core.util.get_program_path()
 
 # make sure the c_overviewer extension is available
 try:
-    from overviewer_core import c_overviewer
+    from overviewer_core.render import c_overviewer
 except ImportError:
     ## if this is a frozen windows package, the following error messages about
     ## building the c_overviewer extension are not appropriate
@@ -50,7 +51,8 @@ except ImportError:
 
 
     ## try to find the build extension
-    ext = os.path.join(this_dir, "overviewer_core", "c_overviewer.%s" % ("pyd" if platform.system() == "Windows" else "so"))
+    ext = os.path.join(this_dir, "overviewer_core", 'render', "c_overviewer.%s" %
+        ("pyd" if platform.system() == "Windows" else "so"))
     if os.path.exists(ext):
         print "Something has gone wrong importing the c_overviewer extension.  Please"
         print "make sure it is up-to-date (clean and rebuild)"
@@ -64,7 +66,7 @@ except ImportError:
     print "Run `python setup.py build`, or see the README for details."
     sys.exit(1)
 
-from overviewer_core import textures
+from overviewer_core.render import textures
 
 if hasattr(sys, "frozen"):
     pass # we don't bother with a compat test since it should always be in sync
@@ -83,10 +85,10 @@ else:
     print "Please rebuild your c_overviewer module.  It is out of date!"
     sys.exit(1)
 
-from overviewer_core.configParser import ConfigOptionParser
-from overviewer_core import optimizeimages, world, quadtree
-from overviewer_core import googlemap, rendernode
-
+from overviewer_core.config_parser import ConfigOptionParser
+import overviewer_core.minecraft
+import overviewer_core.render, overviewer_core.render.node
+import overviewer_core.web
 
 helptext = """
 %prog [OPTIONS] <World # / Name / Path to World> <tiles dest dir>"""
@@ -134,6 +136,7 @@ def main():
 
     if options.version:
         try:
+            #TODO this should just be properties of overviewer_core I think?
             import overviewer_core.overviewer_version as overviewer_version
             print "Minecraft-Overviewer %s" % overviewer_version.VERSION
             print "Git commit: %s" % overviewer_version.HASH
@@ -164,7 +167,7 @@ def main():
 
     if options.check_terrain:
         import hashlib
-        from overviewer_core.textures import _find_file
+        from overviewer_core.render.textures import _find_file
         if options.textures_path:
             textures._find_file_local_path = options.textures_path
 
@@ -203,7 +206,7 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
 
     if not os.path.exists(worlddir):
         # world given is either world number, or name
-        worlds = world.get_worlds()
+        worlds = overviewer_core.minecraft.get_worlds()
         
         # if there are no worlds found at all, exit now
         if not worlds:
@@ -256,7 +259,7 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
         regionlist = None
 
     if options.imgformat:
-        if options.imgformat not in ('jpg','png'):
+        if options.imgformat not in overviewer_core.render.QuadTreeGenerator.TILE_IMG_FORMATS:
             parser.error("Unknown imgformat!")
         else:
             imgformat = options.imgformat
@@ -265,7 +268,7 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
 
     if options.optimizeimg:
         optimizeimg = int(options.optimizeimg)
-        optimizeimages.check_programs(optimizeimg)
+        overviewer_core.render.check_programs(optimizeimg)
     else:
         optimizeimg = None
 
@@ -302,12 +305,13 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
     
     # make sure that the textures can be found
     try:
-        textures.generate(path=options.textures_path)
+        overviewer_core.render.textures.generate(path=options.textures_path)
     except IOError, e:
         logging.error(str(e))
         sys.exit(1)
     
     # First do world-level preprocessing
+    #TODO this is now completely wrong, needs fixed
     w = world.World(worlddir, destdir, useBiomeData=useBiomeData, regionlist=regionlist, north_direction=north_direction)
     if north_direction == 'auto':
         north_direction = w.persistentData['north_direction']
@@ -323,43 +327,53 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
 
     logging.info("Rending the following tilesets: %s", ",".join(options.rendermode))
 
-    bgcolor = (int(options.bg_color[1:3],16), int(options.bg_color[3:5],16), int(options.bg_color[5:7],16), 0)
+    bgcolor = (int(options.bg_color[1:3],16), int(options.bg_color[3:5],16),
+        int(options.bg_color[5:7],16), 0)
 
     # create the quadtrees
     # TODO chunklist
     q = []
-    qtree_args = {'depth' : options.zoom, 'imgformat' : imgformat, 'imgquality' : options.imgquality, 'optimizeimg' : optimizeimg, 'bgcolor' : bgcolor, 'forcerender' : options.forcerender}
+    qtree_args = {
+        'depth': options.zoom,
+        'imgformat': imgformat,
+        'imgquality': options.imgquality,
+        'optimizeimg': optimizeimg,
+        'bgcolor': bgcolor,
+        'forcerender': options.forcerender
+    }
     for rendermode in options.rendermode:
         if rendermode == 'normal':
-            qtree = quadtree.QuadtreeGen(w, destdir, rendermode=rendermode, tiledir='tiles', **qtree_args)
+            qtree = overviewer_core.render.QuadTreeGenerator(w, destdir,
+                rendermode=rendermode, tiledir='tiles', **qtree_args)
         else:
-            qtree = quadtree.QuadtreeGen(w, destdir, rendermode=rendermode, **qtree_args)
+            qtree = overviewer_core.render.QuadTreeGenerator(w, destdir,
+                rendermode=rendermode, **qtree_args)
         q.append(qtree)
     
     # do quadtree-level preprocessing
     for qtree in q:
-        qtree.go(options.procs)
+        qtree.pre_process()
 
     # create the distributed render
-    r = rendernode.RenderNode(q, options)
+    node = overviewer_core.render.node.RenderNode(q, options)
     
     # write out the map and web assets
-    m = googlemap.MapGen(q, configInfo=options)
+    m = overviewer_core.web.MapGen(q, configInfo=options)
     m.go(options.procs)
     
     # render the tiles!
-    r.go(options.procs)
+    node.go(options.procs)
 
     # finish up the map
     m.finalize()
 
     if options.changelist:
         changed=[]
-        for tile in r.rendered_tiles:
+        for tile in node.rendered_tiles:
             if options.changelist_format=="absolute":
                 tile=os.path.abspath(tile)
             changed.append(tile)
-            for zl in range(q[0].p - 1):
+            for zl in range(q[0].get_depth() - 1):
                 tile=os.path.dirname(tile)
                 changed.append("%s.%s" % (tile, imgformat))
         #Quick and nasty way to remove duplicate entries
@@ -413,7 +427,7 @@ def list_rendermodes():
 def list_worlds():
     "Prints out a brief summary of saves found in the default directory"
     print 
-    worlds = world.get_worlds()
+    worlds = overviewer_core.minecraft.get_worlds()
     if not worlds:
         print 'No world saves found in the usual place'
         return
