@@ -50,7 +50,14 @@ class QuadTreeGenerator(object):
     """
     
     PERSISTENT_DATA_FILENAME    = 'overviewer.dat'
-    MAX_TREE_DEPTH              = 15
+    """TODO doc this, tl;dr is this is the maximum zoom that can ever be required
+    
+    chunk coords are signed 32bit int, so range is
+    -2^32 <-> 2^32-1 which means the farthest chunk is at -2^32, -2^32 which
+    requires zoom level 33 (see RegionSet.get_diag_coords_from_chunk)
+    """
+    MAX_TREE_DEPTH              = 33
+    WARN_TREE_DEPTH             = self.MAX_TREE_DEPTH // 2
     #TODO these should probably be module constants/globals/whatever
     TILE_SIZE                   = 384
     HALF_TILE_SIZE              = self.TILE_SIZE // 2
