@@ -56,7 +56,7 @@ class QuadTreeGenerator(object):
     -2^31 <-> 2^31-1 which means the farthest chunk is at -2^31, -2^31 which
     requires zoom level 32 (see RegionSet.get_diag_coords_from_chunk)
     """
-    MAX_TREE_DEPTH              = 33
+    MAX_TREE_DEPTH              = 32
     WARN_TREE_DEPTH             = self.MAX_TREE_DEPTH // 2
     #TODO these should probably be module constants/globals/whatever
     TILE_SIZE                   = 384
