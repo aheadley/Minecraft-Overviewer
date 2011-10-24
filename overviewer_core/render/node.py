@@ -227,8 +227,6 @@ the last and the first takes extra time")
         #   work on similar chunks)
         iterators = [qt.iterate_world_tiles() for qt in self.quadtrees]
         for job in roundrobin(iterators):
-            # fixup so the worker knows which quadtree this is
-            job[0] = job[0]._render_index
             # Put this in the batch to be submited to the pool
             batch.append(job)
             jobcount += 1
@@ -255,9 +253,7 @@ the last and the first takes extra time")
         iterators = [qt.iterate_composed_tiles(zoom) for qt in self.quadtrees \
             if zoom <= qt.get_depth()]
         for job in roundrobin(iterators):
-            # fixup so the worker knows which quadtree this is  
-            job[0] = job[0]._render_index
-            # Put this in the batch to be submited to the pool  
+            # Put this in the batch to be submited to the pool
             batch.append(job)
             jobcount += 1
             if jobcount >= batch_size:
@@ -272,6 +268,8 @@ the last and the first takes extra time")
                 args=[batch])
 
     def _get_batch_size(self):
+        """
+        """
         size = 4 * len(self.quadtrees)
         while size < 10:
             size *= 2
@@ -319,8 +317,11 @@ the last and the first takes extra time")
         self.print_statusline(finished_tile_count, total_tile_count, level, True)
 
     def _drain_poi_queue(self, quadtree):
+        """
+        """
         while True:
             try:
+                #TODO actually add poi queue to quadtree
                 item = quadtree.poi_queue.get(block=False)
             except Queue.Empty:
                 break
@@ -343,13 +344,8 @@ def batch_render_world_tiles(batch):
     count = 0
     for job in batch:
         count += 1
-        quadtree = rendernode.quadtrees[job[0]]
-        column_start = job[1]
-        column_end = job[2]
-        row_start = job[3]
-        row_end = job[4]
-        path = job[5]
-        quadtree.render_world_tile(colstart, colend, rowstart, rowend, path)
+        render_args = job[1:]
+        rendernode.quadtrees[job[0]].render_world_tile(*render_args)
     return count
 
 @catch_keyboardinterrupt
@@ -361,10 +357,7 @@ def batch_render_composed_tiles(batch):
     count = 0
     for job in batch:
         count += 1
-        quadtree = rendernode.quadtrees[job[0]]
-        #TODO this should be different
-        dest = quadtree.full_tiledir+os.sep+job[1]
-        quadtree.render_composed_tile(dest=dest, name=job[2])
+        rendernode.quadtrees[job[0]].render_composed_tile(job[1])
     return count
     
 class FakeResult(object):
@@ -391,4 +384,3 @@ class FakePool(object):
 
     def join(self):
         pass
-    

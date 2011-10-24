@@ -15,9 +15,9 @@
 #    with the Overviewer.  If not, see <http://www.gnu.org/licenses/>.
 
 import os.path
-import cPickle
 import nbt
 import glob
+import logging
 
 """
 Notes:
@@ -60,6 +60,7 @@ class RegionSet(object):
     def __init__(self, world, name, **kwargs):
         self.world = world
         self.name = name
+        #TODO finish this i guess?
         self.path = os.path.join(
         self.name = self._get_name(path)
         if self.world.path[:len(path)] == path:
@@ -109,7 +110,7 @@ class RegionSet(object):
     def get_region_coords_from_chunk(self, chunkX, chunkY):
         """Convert chunk coords into the containing region coords
         """
-        return chunkX//32, chunkY//32
+        return chunkX // 32, chunkY // 32
     
     def get_region_path_from_chunk(self, chunkX, chunkY):
         """
@@ -281,15 +282,6 @@ class RegionSet(object):
             max_row=min_row,
         }
     
-    def get_id_hash(self):
-        """Get a hash representing a set config parameters. If this doesn't
-        match the hash in the output dir then we should probably require
-        force render so people don't get maps with a grabbag set of tiles.
-        """
-        #TODO: this is almost guaranteed to be wrong, fix it
-        #is probably also not needed
-        return mhash.sha1(repr(self._persistent_data))
-        
     def _region_file_iterator(self, region_paths=None):
         """Iterates over region filenames in the set returning their coords
         """

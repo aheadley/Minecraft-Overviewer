@@ -73,6 +73,8 @@ class QuadTreeGenerator(object):
         self.region_set = region_set
         self.dest_path = dest_path
         self._depth = kwargs.get('depth', None)
+        #Used by rendernode to keep track of quadtrees
+        self._render_index = None
         if self._depth is None:
             #we didn't get a depth so we need to figure it out
             for tree_depth in xrange(self.MAX_TREE_DEPTH):
@@ -129,10 +131,10 @@ option in 'settings.py'.")
             column_start, row_start = self._get_chunk_coords_by_path(path)
             column_end = column_start + 2
             row_end = row_start + 4
-            
+            #we pass the path around as a string to save memory
             tile_path = os.path.join(map(str, path))
-            #TODO why is self in here?
-            yield [self, column_start, column_end, row_start, row_end, tile_path]
+            yield [self._render_index, column_start, column_end, row_start,
+                row_end, tile_path]
     
     def iterate_composed_tiles(self, level):
         """An iterator for all but the lowest level of tiles. These are the tiles
@@ -141,9 +143,7 @@ option in 'settings.py'.")
         #replaces QuadtreeGen.get_innertiles
         #TODO should check that level != self._depth ?
         for path in self.iterate_base4(level):
-            tile_path = os.path.join(map(str, path[:-1]))
-            name = str(path[-1])
-            yield [self, tile_path, name]
+            yield [self._render_index, os.path.join(map(str, path))]
 
     def get_depth(self):
         """
@@ -156,14 +156,12 @@ option in 'settings.py'.")
         """
         #replaces QuadtreeGen.render_innertile
         img_format = self._persistent_data['img_format']
-        img_name = '%d.%s' % (path[-1], img_format)
-        img_path = os.path.join(self.dest_path, *map(str,path[:-1]), img_name)
-
         if path is not None:
-            target_dirname = os.path.dirname(img_path)
+            img_path = os.path.join(self.dest_path, '%s.%s' % (path, img_format))
         else:
             #base image
-            target_dirname = self.dest_path
+            img_path = os.path.join(self.dest_path, 'base.' + img_format)
+        target_dirname = os.path.dirname(img_path)
         quad_img_paths = [
             [(0, 0),
                 os.path.join(target_dirname, '0.' + img_format)],
@@ -183,7 +181,7 @@ option in 'settings.py'.")
             img_mtime = None
 
         #check mtimes on each part of the quad, this also checks if they exist
-        rerender = img_mtime is None or force
+        rerender = force or img_mtime is None
         quad_img_paths_filtered = []
         for quad_img_path in quad_img_paths:
             try:
@@ -242,19 +240,12 @@ may need to delete it. %s", quad_path[1], e)
         Standard tile size has colend-colstart=2 and rowend-rowstart=4
 
         There is no return value
-        """
-        #replaces QuadtreeGen.render_worldtile
-
         # width of one chunk is 384. Each column is half a chunk wide. The total
         # width is (384 + 192*(numcols-1)) since the first column contributes full
         # width, and each additional one contributes half since they're staggered.
         # However, since we want to cut off half a chunk at each end (384 less
         # pixels) and since (colend - colstart + 1) is the number of columns
         # inclusive, the equation simplifies to:
-        img_width = self.HALF_TILE_SIZE * (column_end - column_start)
-        # Same deal with height
-        img_height = self.HALF_TILE_SIZE * (row_end - row_start)
-
         # The standard tile size is 3 columns by 5 rows, which works out to 384x384
         # pixels for 8 total chunks. (Since the chunks are staggered but the grid
         # is not, some grid coordinates do not address chunks) The two chunks on
@@ -271,11 +262,14 @@ may need to delete it. %s", quad_path[1], e)
         # this (since very few chunks actually touch the top of the sky, some tiles
         # way above this one are possibly visible in this tile). Render them
         # anyways just in case). "chunks" should include up to rowstart-16
+        """
+        #replaces QuadtreeGen.render_worldtile
 
-        img_filename = '%d.%s' % (path[-1], self._persistent_data['img_format'])
-        img_path = os.path.join(self.dest_path, *map(str,path[:-1]), img_filename)
+        img_width = self.HALF_TILE_SIZE * (column_end - column_start)
+        img_height = self.HALF_TILE_SIZE * (row_end - row_start)
+        img_path = os.path.join(self.dest_path, '%s.%s' %
+            (path, self._persistent_data['img_format']))
         img_dirname = os.path.dirname(img_path)
-
         chunks = self.get_chunks_in_range(column_start, column_end, row_start,
             row_end)
 
@@ -293,16 +287,14 @@ may need to delete it. %s", quad_path[1], e)
                 os.unlink(img_path)
             return
 
-        # Create the directory if not exists
-        if not os.path.exists(img_dirname):
-            try:
-                os.makedirs(img_dirname)
-            except OSError, e:
-                # Ignore errno EEXIST: file exists. Since this is multithreaded,
-                # two processes could conceivably try and create the same directory
-                # at the same time.
-                if e.errno != errno.EEXIST:
-                    raise
+        try:
+            os.makedirs(img_dirname)
+        except OSError, e:
+            # Ignore errno EEXIST: file exists. Since this is multithreaded,
+            # two processes could conceivably try and create the same directory
+            # at the same time.
+            if e.errno != errno.EEXIST:
+                raise
 
         # check chunk mtimes to see if they are newer
         rerender = force
@@ -506,7 +498,8 @@ may need to delete it. %s", quad_path[1], e)
         """
         """
         if self._persistent_data['img_format'] == 'jpg':
-            img.save(img_path, quality=self._persistent_data['img_quality'],
+            img.save(img_path,
+                quality=self._persistent_data['img_quality'],
                 subsampling=self.JPG_SUBSAMPLING)
         else:
             img.save(img_path)

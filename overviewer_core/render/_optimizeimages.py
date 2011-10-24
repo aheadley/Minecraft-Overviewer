@@ -16,13 +16,14 @@
 
 import os
 import subprocess
-import shlex
 
 PNGCRUSH = 'pngcrush'
 OPTIPNG = 'optipng'
 ADVDEF = 'advdef'
 
-def check_optimizer_programs(level):
+def check_optimizer_programs(optimize_level):
+    """
+    """
     path = os.environ.get('PATH').split(os.pathsep)
     
     def exists_in_path(prog):
@@ -30,23 +31,28 @@ def check_optimizer_programs(level):
         return len(result) != 0
 
     for prog, l in [(PNGCRUSH,1), (ADVDEF, 2)]:
-        if l <= level:
+        if l <= optimize_level:
             if (not exists_in_path(prog)) and (not exists_in_path(prog + '.exe')):
-                raise Exception("Optimization prog %s for level %d not found!" % (prog, l))
+                raise Exception("Optimization prog %s for level %d not found!" %
+                    (prog, l))
 
-def optimize_image(imgpath, imgformat, optimizeimg):
-    if imgformat == 'png':
-        if optimizeimg >= 1:
+def optimize_image(img_path, img_format, optimize_level):
+    """
+    """
+    if img_format == 'png':
+        if optimize_level >= 1:
             # we can't do an atomic replace here because windows is terrible
             # so instead, we make temp files, delete the old ones, and rename
             # the temp files. go windows!
-            subprocess.Popen([PNGCRUSH, imgpath, imgpath + '.tmp'],
+            subprocess.Popen([PNGCRUSH, img_path, img_path + '.tmp'],
                 stderr=subprocess.STDOUT, stdout=subprocess.PIPE).communicate()[0]
-            os.remove(imgpath)
-            os.rename(imgpath + '.tmp', imgpath)
+            os.remove(img_path)
+            os.rename(img_path + '.tmp', img_path)
 
-        if optimizeimg >= 2:
+        if optimize_level >= 2:
             # the "-nc" it's needed to no broke the transparency of tiles
-            recompress_option = '-z2' if optimizeimg == 2 else '-z4'
-            subprocess.Popen([ADVDEF, recompress_option,imgpath], stderr=subprocess.STDOUT,
+            # use -z4 if optimize level is 3 or higher
+            recompress_option = '-z2' if optimize_level is 2 else '-z4'
+            subprocess.Popen([ADVDEF, recompress_option, img_path],
+                stderr=subprocess.STDOUT,
                 stdout=subprocess.PIPE).communicate()[0]
