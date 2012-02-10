@@ -18,9 +18,13 @@
 import sys
 import platform
 
+#may want to think about PyQt4 support as well, see:
+#http://developer.qt.nokia.com/wiki/Differences_Between_PySide_and_PyQt
+#https://github.com/epage/PythonUtils/blob/master/util/qt_compat.py
 from PySide.QtCore import *
 from PySide.QtGui import *
 
+#this has to come after check_version() is called, does not exist on <=2.6
 import multiprocessing
 
 def check_version():
