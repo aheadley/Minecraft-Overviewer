@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+import subprocess
+subprocess.popen('java tectonicus.jar')
+sys.exit(0)
+
 #    This file is part of the Minecraft Overviewer.
 #
 #    Minecraft Overviewer is free software: you can redistribute it and/or
